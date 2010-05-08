@@ -13,6 +13,8 @@ using namespace v8;
 using namespace node;
 
 
+typedef ScopedOutputBuffer<Bytef> ScopedBytesBlob;
+
 class Gzip : public EventEmitter {
  public:
   static void
@@ -42,38 +44,36 @@ class Gzip : public EventEmitter {
     return ret;
   }
 
-  int GzipDeflate(char* data, int data_len, char** out, int* out_len) {
+  int GzipDeflate(char* data, int data_len, ScopedBytesBlob &out, int* out_len) {
     int ret;
     char* temp;
     int i=1;
 
-    *out = NULL;
     *out_len = 0;
     ret = 0;
 
     if (data_len == 0)
       return 0;
 
-    while(data_len>0) {    
-      if (data_len>CHUNK) {
-	strm.avail_in = CHUNK;
+    while (data_len > 0) {    
+      if (data_len > CHUNK) {
+        strm.avail_in = CHUNK;
       } else {
-	strm.avail_in = data_len;
+        strm.avail_in = data_len;
       }
 
       strm.next_in = (Bytef*)data;
       do {
-	temp = (char *)realloc(*out, CHUNK*i +1);
-	if (temp == NULL) {
-	  return Z_MEM_ERROR;
-	}
-	*out = temp;
-	strm.avail_out = CHUNK;
-        strm.next_out = (Bytef*)*out + *out_len;
-	ret = deflate(&strm, Z_NO_FLUSH);
-	assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
-	*out_len += (CHUNK - strm.avail_out);
-	i++;
+        if (!out.GrowTo(CHUNK * i + 1)) {
+          return Z_MEM_ERROR;
+        }
+        strm.avail_out = CHUNK;
+        strm.next_out = out.data() + *out_len;
+
+        ret = deflate(&strm, Z_NO_FLUSH);
+        assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
+        *out_len += (CHUNK - strm.avail_out);
+        ++i;
       } while (strm.avail_out == 0);
 
       data += CHUNK;
@@ -83,30 +83,27 @@ class Gzip : public EventEmitter {
   }
 
 
-  int GzipEnd(char** out, int*out_len) {
+  int GzipEnd(ScopedBytesBlob &out, int *out_len) {
     int ret;
     char* temp;
     int i = 1;
 
-    *out = NULL;
     *out_len = 0;
     strm.avail_in = 0;
     strm.next_in = NULL;
 
     do {
-      temp = (char *)realloc(*out, CHUNK*i);
-      if (temp == NULL) {
-	return Z_MEM_ERROR;
+      if (!out.GrowTo(CHUNK * i)) {
+        return Z_MEM_ERROR;
       }
-      *out = temp;
+
       strm.avail_out = CHUNK;
-      strm.next_out = (Bytef*)*out + *out_len;
+      strm.next_out = out.data() + *out_len;
       ret = deflate(&strm, Z_FINISH);
       assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
       *out_len += (CHUNK - strm.avail_out);
-      i++;
+      ++i;
     } while (strm.avail_out == 0);
-    
 
     deflateEnd(&strm);
     return ret;
@@ -157,16 +154,15 @@ class Gzip : public EventEmitter {
     ssize_t written = DecodeWrite(buf.data(), len, args[0], enc);
     assert(written == len);
 
-    char* out;
+    ScopedBytesBlob out;
     int out_size;
-    int r = gzip->GzipDeflate(buf.data(), len, &out, &out_size);
+    int r = gzip->GzipDeflate(buf.data(), len, out, &out_size);
 
-    if (out_size==0) {
+    if (out_size == 0) {
       return scope.Close(String::New(""));
     }
 
-    Local<Value> outString = Encode(out, out_size, BINARY);
-    free(out);
+    Local<Value> outString = Encode(out.data(), out_size, BINARY);
     return scope.Close(outString);
   }
 
@@ -176,7 +172,7 @@ class Gzip : public EventEmitter {
 
     HandleScope scope;
 
-    char* out;
+    ScopedBytesBlob out;
     int out_size;
     bool hex_format = false;
 
@@ -185,13 +181,12 @@ class Gzip : public EventEmitter {
     }  
 
 
-    int r = gzip->GzipEnd( &out, &out_size);
+    int r = gzip->GzipEnd(out, &out_size);
 
     if (out_size==0) {
       return String::New("");
     }
-    Local<Value> outString = Encode(out, out_size, BINARY);
-    free(out);
+    Local<Value> outString = Encode(out.data(), out_size, BINARY);
     return scope.Close(outString);
 
   }
