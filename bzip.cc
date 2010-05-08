@@ -61,11 +61,10 @@ class Bzip : public EventEmitter {
     return ret;
   }
 
-  int BzipDeflate(char* data, int data_len, char** out, int* out_len) {
+  int BzipDeflate(char* data, int data_len, ScopedBlob &out, int* out_len) {
     int ret;
     char* temp;
 
-    *out = NULL;
     *out_len = 0;
 
     if (!is_allocated) {
@@ -77,13 +76,11 @@ class Bzip : public EventEmitter {
       strm.avail_in = data_len;
       strm.next_in = data;
 
-      temp = (char *)realloc(*out, *out_len + data_len + 1);
-      if (temp == NULL) {
+      if (!out.GrowBy(data_len + 1)) {
         return BZ_MEM_ERROR;
       }
-      *out = temp;
       strm.avail_out = data_len + 1;
-      strm.next_out = *out + *out_len;
+      strm.next_out = out.data() + *out_len;
 
       ret = BZ2_bzCompress(&strm, BZ_RUN);
       assert(ret != BZ_SEQUENCE_ERROR);  /* state not clobbered */
@@ -96,7 +93,7 @@ class Bzip : public EventEmitter {
   }
 
 
-  int BzipEnd(char** out, int* out_len) {
+  int BzipEnd(ScopedBlob &out, int* out_len) {
     // Don't expect this to be large as output buffer for deflate is as large
     // as input.
     const int Chunk = 128;
@@ -104,7 +101,6 @@ class Bzip : public EventEmitter {
     int ret;
     char* temp;
 
-    *out = NULL;
     *out_len = 0;
 
     if (!is_allocated) {
@@ -115,13 +111,11 @@ class Bzip : public EventEmitter {
     strm.next_in = NULL;
 
     do {
-      temp = (char *)realloc(*out, *out_len + Chunk);
-      if (temp == NULL) {
+      if (!out.GrowBy(Chunk)) {
         return BZ_MEM_ERROR;
       }
-      *out = temp;
       strm.avail_out = Chunk;
-      strm.next_out = *out + *out_len;
+      strm.next_out = out.data() + *out_len;
 
       ret = BZ2_bzCompress(&strm, BZ_FINISH);
       assert(ret != BZ_SEQUENCE_ERROR);  /* state not clobbered */
@@ -196,16 +190,15 @@ class Bzip : public EventEmitter {
     ssize_t written = DecodeWrite(buf.data(), len, args[0], enc);
     assert(written == len);
 
-    char* out;
+    ScopedBlob out;
     int out_size;
-    int r = bzip->BzipDeflate(buf.data(), len, &out, &out_size);
+    int r = bzip->BzipDeflate(buf.data(), len, out, &out_size);
 
     if (out_size==0) {
       return scope.Close(String::New(""));
     }
 
-    Local<Value> outString = Encode(out, out_size, BINARY);
-    free(out);
+    Local<Value> outString = Encode(out.data(), out_size, BINARY);
     return scope.Close(outString);
   }
 
@@ -215,18 +208,17 @@ class Bzip : public EventEmitter {
 
     HandleScope scope;
 
-    char* out;
+    ScopedBlob out;
     int out_size;
     if (args.Length() > 0 && args[0]->IsString()) {
       String::Utf8Value format_type(args[1]->ToString());
     }  
 
-    int r = bzip->BzipEnd(&out, &out_size);
+    int r = bzip->BzipEnd(out, &out_size);
     if (out_size==0) {
       return String::New("");
     }
-    Local<Value> outString = Encode(out, out_size, BINARY);
-    free(out);
+    Local<Value> outString = Encode(out.data(), out_size, BINARY);
     return scope.Close(outString);
   }
 
@@ -283,13 +275,13 @@ class Bunzip : public EventEmitter {
     return ret;
   }
 
-  int BunzipInflate(const char* data, int data_len, char** out, int* out_len) {
+  int BunzipInflate(const char* data, int data_len,
+                    ScopedBlob &out, int* out_len) {
     int ret;
     char* temp;
 
     const int InflateRatio = 3;
 
-    *out = NULL;
     *out_len = 0;
 
     if (!is_allocated) {
@@ -297,19 +289,15 @@ class Bunzip : public EventEmitter {
     }
 
     ret = 0;
-
-    while (data_len > 0) {    
+    while (data_len > 0) { 
       strm.avail_in = data_len;
       strm.next_in = (char*)data;
 
-      temp = (char *)realloc(*out, *out_len + data_len * InflateRatio);
-      if (temp == NULL) {
+      if (!out.GrowBy(data_len * InflateRatio)) {
         return BZ_MEM_ERROR;
       }
-
-      *out = temp;
       strm.avail_out = data_len * InflateRatio;
-      strm.next_out = *out + *out_len;
+      strm.next_out = out.data() + *out_len;
 
       ret = BZ2_bzDecompress(&strm);
       assert(ret != BZ_SEQUENCE_ERROR);  /* state not clobbered */
@@ -381,12 +369,11 @@ class Bunzip : public EventEmitter {
     ssize_t written = DecodeWrite(buf.data(), len, args[0], BINARY);
     assert(written == len);
 
-    char* out;
+    ScopedBlob out;
     int out_size;
-    int r = bunzip->BunzipInflate(buf.data(), len, &out, &out_size);
+    int r = bunzip->BunzipInflate(buf.data(), len, out, &out_size);
 
-    Local<Value> outString = Encode(out, out_size, enc);
-    free(out);
+    Local<Value> outString = Encode(out.data(), out_size, enc);
     return scope.Close(outString);
   }
 
