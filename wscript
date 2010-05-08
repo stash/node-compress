@@ -16,12 +16,13 @@ def configure(conf):
   conf.check_tool("node_addon")
 
   conf.check(lib='z', libpath=['/usr/lib', '/usr/local/lib'], uselib_store='ZLIB')
+  conf.check(lib='bz2', libpath=['/usr/lib', '/usr/local/lib'], uselib_store='BZLIB')
 
 def build(bld):
   obj = bld.new_task_gen("cxx", "shlib", "node_addon")
   obj.target = "compress"
   obj.source = "compress.cc"
-  obj.uselib = "ZLIB"
+  obj.uselib = "ZLIB BZLIB"
 
 def shutdown():
   # HACK to get compress.node out of build directory.

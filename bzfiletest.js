@@ -3,39 +3,39 @@ var sys=require("sys");
 var posix=require("fs");
 
 // Read in our test file
-var data=posix.readFileSync("filetest.js", encoding="binary");
+var data=posix.readFileSync("bzfiletest.js", encoding="binary");
 sys.puts("Got : "+data.length);
 
 // Set output file
-var fd = posix.openSync("filetest.js.gz",
+var fd = posix.openSync("bzfiletest.js.bz2",
     process.O_WRONLY | process.O_TRUNC | process.O_CREAT, 0644);
 sys.puts("Openned file");
 
-// Create gzip stream
-var gzip=new compress.Gzip;
-gzip.init();
+// Create bzip stream
+var bzip=new compress.Bzip;
+bzip.init();
 
 // Pump data to be compressed
-gzdata=gzip.deflate(data, "binary");  // Do this as many times as required
+gzdata=bzip.deflate(data, "binary");  // Do this as many times as required
 sys.puts("Compressed size : "+gzdata.length);
 posix.writeSync(fd, gzdata, encoding="binary");
 
 // Get the last bit
-gzlast=gzip.end();
+gzlast=bzip.end();
 sys.puts("Last bit : "+gzlast.length);
 posix.writeSync(fd, gzlast, encoding="binary");
 posix.closeSync(fd);
 sys.puts("File closed");
 
 // See if we can uncompress it ok
-var gunzip=new compress.Gunzip;
-gunzip.init();
-var testdata = posix.readFileSync("filetest.js.gz", encoding="binary");
+var bunzip=new compress.Bunzip;
+bunzip.init();
+var testdata = posix.readFileSync("bzfiletest.js.bz2", encoding="binary");
 sys.puts("Test opened : "+testdata.length);
-var source = gunzip.inflate(testdata, "binary");
+var source = bunzip.inflate(testdata, "binary");
 sys.puts(source.length);
 sys.puts(source);
-gunzip.end();
+bunzip.end();
 
 
 
