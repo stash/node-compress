@@ -180,7 +180,6 @@ class Gzip : public EventEmitter {
       String::Utf8Value format_type(args[1]->ToString());
     }  
 
-
     int r = gzip->GzipEnd(out, &out_size);
 
     if (out_size==0) {
@@ -188,11 +187,10 @@ class Gzip : public EventEmitter {
     }
     Local<Value> outString = Encode(out.data(), out_size, BINARY);
     return scope.Close(outString);
-
   }
 
 
-  Gzip () : EventEmitter () 
+  Gzip () : EventEmitter ()
   {
   }
 
@@ -236,52 +234,48 @@ class Gunzip : public EventEmitter {
     return ret;
   }
 
-  int GunzipInflate(const char* data, int data_len, char** out, int* out_len) {
+  int GunzipInflate(const char* data, int data_len,
+                    ScopedBytesBlob &out, int* out_len) {
     int ret;
     char* temp;
-    int i=1;
+    int i = 1;
 
-    *out = NULL;
     *out_len = 0;
-
     if (data_len == 0)
       return 0;
 
-    while(data_len>0) {    
-      if (data_len>CHUNK) {
-	strm.avail_in = CHUNK;
+    while(data_len > 0) {    
+      if (data_len > CHUNK) {
+        strm.avail_in = CHUNK;
       } else {
-	strm.avail_in = data_len;
+        strm.avail_in = data_len;
       }
 
       strm.next_in = (Bytef*)data;
 
       do {
-	temp = (char *)realloc(*out, CHUNK*i);
-	if (temp == NULL) {
-	  return Z_MEM_ERROR;
-	}
-	*out = temp;
+        if (!out.GrowTo(CHUNK * i)) {
+          return Z_MEM_ERROR;
+        }
         strm.avail_out = CHUNK;
-	strm.next_out = (Bytef*)*out + *out_len;
-	ret = inflate(&strm, Z_NO_FLUSH);
-	assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
-	switch (ret) {
-	case Z_NEED_DICT:
-	  ret = Z_DATA_ERROR;     /* and fall through */
-	case Z_DATA_ERROR:
-	case Z_MEM_ERROR:
-	  (void)inflateEnd(&strm);
-	  return ret;
-	}
-	*out_len += (CHUNK - strm.avail_out);
-	i++;
+        strm.next_out = out.data() + *out_len;
+        ret = inflate(&strm, Z_NO_FLUSH);
+        assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
+        switch (ret) {
+        case Z_NEED_DICT:
+          ret = Z_DATA_ERROR;     /* and fall through */
+        case Z_DATA_ERROR:
+        case Z_MEM_ERROR:
+          (void)inflateEnd(&strm);
+          return ret;
+        }
+        *out_len += (CHUNK - strm.avail_out);
+        ++i;
       } while (strm.avail_out == 0);
       data += CHUNK;
       data_len -= CHUNK;
     }
     return ret;
-
   }
 
 
@@ -331,12 +325,11 @@ class Gunzip : public EventEmitter {
     ssize_t written = DecodeWrite(buf.data(), len, args[0], BINARY);
     assert(written == len);
 
-    char* out;
+    ScopedBytesBlob out;
     int out_size;
-    int r = gunzip->GunzipInflate(buf.data(), len, &out, &out_size);
+    int r = gunzip->GunzipInflate(buf.data(), len, out, &out_size);
 
-    Local<Value> outString = Encode(out, out_size, enc);
-    free(out);
+    Local<Value> outString = Encode(out.data(), out_size, enc);
     return scope.Close(outString);
   }
 
