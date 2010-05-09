@@ -12,7 +12,6 @@
 using namespace v8;
 using namespace node;
 
-
 typedef ScopedOutputBuffer<Bytef> ScopedBytesBlob;
 
 class Gzip : public EventEmitter {
@@ -34,78 +33,95 @@ class Gzip : public EventEmitter {
     target->Set(String::NewSymbol("Gzip"), t->GetFunction());
   }
 
+ private:
   int GzipInit(int level) {
-    int ret;
+    COND_RETURN(state_ != State::Idle, Z_STREAM_ERROR);
+
     /* allocate deflate state */
-    strm.zalloc = Z_NULL;
-    strm.zfree = Z_NULL;
-    strm.opaque = Z_NULL;
-    ret = deflateInit2(&strm, level, Z_DEFLATED, 16+MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
-    return ret;
-  }
+    stream_.zalloc = Z_NULL;
+    stream_.zfree = Z_NULL;
+    stream_.opaque = Z_NULL;
 
-  int GzipDeflate(char* data, int data_len, ScopedBytesBlob &out, int* out_len) {
-    int ret;
-    char* temp;
-    int i=1;
-
-    *out_len = 0;
-    ret = 0;
-
-    if (data_len == 0)
-      return 0;
-
-    while (data_len > 0) {    
-      if (data_len > CHUNK) {
-        strm.avail_in = CHUNK;
-      } else {
-        strm.avail_in = data_len;
-      }
-
-      strm.next_in = (Bytef*)data;
-      do {
-        if (!out.GrowTo(CHUNK * i + 1)) {
-          return Z_MEM_ERROR;
-        }
-        strm.avail_out = CHUNK;
-        strm.next_out = out.data() + *out_len;
-
-        ret = deflate(&strm, Z_NO_FLUSH);
-        assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
-        *out_len += (CHUNK - strm.avail_out);
-        ++i;
-      } while (strm.avail_out == 0);
-
-      data += CHUNK;
-      data_len -= CHUNK;
+    int ret = deflateInit2(&stream_, level,
+                           Z_DEFLATED, 16 + MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
+    if (ret == Z_OK) {
+      state_ = State::Data;
     }
     return ret;
   }
 
 
-  int GzipEnd(ScopedBytesBlob &out, int *out_len) {
-    int ret;
-    char* temp;
-    int i = 1;
-
+  int GzipDeflate(char* data, int data_len,
+                  ScopedBytesBlob &out, int* out_len) {
     *out_len = 0;
-    strm.avail_in = 0;
-    strm.next_in = NULL;
+    COND_RETURN(state_ != State::Data, Z_STREAM_ERROR);
 
-    do {
-      if (!out.GrowTo(CHUNK * i)) {
-        return Z_MEM_ERROR;
+    State::Transition t(state_, State::Error);
+
+    int ret = Z_OK;
+    while (data_len > 0) {    
+      if (data_len > CHUNK) {
+        stream_.avail_in = CHUNK;
+      } else {
+        stream_.avail_in = data_len;
       }
 
-      strm.avail_out = CHUNK;
-      strm.next_out = out.data() + *out_len;
-      ret = deflate(&strm, Z_FINISH);
-      assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
-      *out_len += (CHUNK - strm.avail_out);
-      ++i;
-    } while (strm.avail_out == 0);
+      stream_.next_in = (Bytef*)data;
+      do {
+        COND_RETURN(!out.GrowBy(CHUNK), Z_MEM_ERROR);
 
-    deflateEnd(&strm);
+        stream_.avail_out = CHUNK;
+        stream_.next_out = out.data() + *out_len;
+
+        ret = deflate(&stream_, Z_NO_FLUSH);
+        assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
+        COND_RETURN(ret != Z_OK, ret);
+
+        *out_len += (CHUNK - stream_.avail_out);
+      } while (stream_.avail_out == 0);
+
+      data += CHUNK;
+      data_len -= CHUNK;
+    }
+
+    t.alter(State::Data);
+    return ret;
+  }
+
+
+  int GzipEnd(ScopedBytesBlob &out, int *out_len) {
+    *out_len = 0;
+    COND_RETURN(state_ == State::Idle, Z_OK);
+    assert(state_ == State::Data || state_ == State::Error);
+
+    State::Transition t(state_, State::Idle);
+    int ret = Z_OK;
+    if (state_ == State::Data) {
+      ret = GzipEndWithData(out, out_len);
+    }
+
+    deflateEnd(&stream_);
+    return ret;
+  }
+
+
+  int GzipEndWithData(ScopedBytesBlob &out, int *out_len) {
+    int ret;
+
+    stream_.avail_in = 0;
+    stream_.next_in = NULL;
+    do {
+      COND_RETURN(!out.GrowBy(CHUNK), Z_MEM_ERROR);
+
+      stream_.avail_out = CHUNK;
+      stream_.next_out = out.data() + *out_len;
+
+      ret = deflate(&stream_, Z_FINISH);
+      assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
+      COND_RETURN(ret != Z_OK && ret != Z_STREAM_END, ret);
+
+      *out_len += (CHUNK - stream_.avail_out);
+    } while (ret != Z_STREAM_END);
     return ret;
   }
 
@@ -131,9 +147,7 @@ class Gzip : public EventEmitter {
     HandleScope scope;
 
     int level=Z_DEFAULT_COMPRESSION;
-
     int r = gzip->GzipInit(level);
-
     return scope.Close(Integer::New(r));
   }
 
@@ -190,17 +204,22 @@ class Gzip : public EventEmitter {
   }
 
 
-  Gzip () : EventEmitter ()
-  {
-  }
+  Gzip() 
+    : EventEmitter(), state_(State::Idle)
+  {}
 
-  ~Gzip ()
+  ~Gzip()
   {
+    if (state_ != State::Idle) {
+      // Release zlib structures.
+      deflateEnd(&stream_);
+    }
   }
 
  private:
+  z_stream stream_;
+  State::Value state_;
 
-  z_stream strm;
 };
 
 
@@ -223,64 +242,82 @@ class Gunzip : public EventEmitter {
     target->Set(String::NewSymbol("Gunzip"), t->GetFunction());
   }
 
+ private:
   int GunzipInit() {
+    COND_RETURN(state_ != State::Idle, Z_STREAM_ERROR);
+
     /* allocate inflate state */
-    strm.zalloc = Z_NULL;
-    strm.zfree = Z_NULL;
-    strm.opaque = Z_NULL;
-    strm.avail_in = 0;
-    strm.next_in = Z_NULL;
-    int ret = inflateInit2(&strm, 16+MAX_WBITS);
-    return ret;
-  }
+    stream_.zalloc = Z_NULL;
+    stream_.zfree = Z_NULL;
+    stream_.opaque = Z_NULL;
+    stream_.avail_in = 0;
+    stream_.next_in = Z_NULL;
 
-  int GunzipInflate(const char* data, int data_len,
-                    ScopedBytesBlob &out, int* out_len) {
-    int ret;
-    char* temp;
-    int i = 1;
-
-    *out_len = 0;
-    if (data_len == 0)
-      return 0;
-
-    while(data_len > 0) {    
-      if (data_len > CHUNK) {
-        strm.avail_in = CHUNK;
-      } else {
-        strm.avail_in = data_len;
-      }
-
-      strm.next_in = (Bytef*)data;
-
-      do {
-        if (!out.GrowTo(CHUNK * i)) {
-          return Z_MEM_ERROR;
-        }
-        strm.avail_out = CHUNK;
-        strm.next_out = out.data() + *out_len;
-        ret = inflate(&strm, Z_NO_FLUSH);
-        assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
-        switch (ret) {
-        case Z_NEED_DICT:
-          ret = Z_DATA_ERROR;     /* and fall through */
-        case Z_DATA_ERROR:
-        case Z_MEM_ERROR:
-          (void)inflateEnd(&strm);
-          return ret;
-        }
-        *out_len += (CHUNK - strm.avail_out);
-        ++i;
-      } while (strm.avail_out == 0);
-      data += CHUNK;
-      data_len -= CHUNK;
+    int ret = inflateInit2(&stream_, 16 + MAX_WBITS);
+    if (ret == Z_OK) {
+      state_ = State::Data;
     }
     return ret;
   }
 
 
+  int GunzipInflate(const char* data, int data_len,
+                    ScopedBytesBlob &out, int* out_len) {
+    *out_len = 0;
+    COND_RETURN(state_ == State::Eos, Z_OK);
+    COND_RETURN(state_ != State::Data, Z_STREAM_ERROR);
+
+    State::Transition t(state_, State::Error);
+
+    int ret = Z_OK;
+    while (data_len > 0) { 
+      if (data_len > CHUNK) {
+        stream_.avail_in = CHUNK;
+      } else {
+        stream_.avail_in = data_len;
+      }
+
+      stream_.next_in = (Bytef*)data;
+      do {
+        COND_RETURN(!out.GrowBy(CHUNK), Z_MEM_ERROR);
+        
+        stream_.avail_out = CHUNK;
+        stream_.next_out = out.data() + *out_len;
+
+        ret = inflate(&stream_, Z_NO_FLUSH);
+        assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
+
+        switch (ret) {
+        case Z_NEED_DICT:
+          ret = Z_DATA_ERROR;     /* and fall through */
+        case Z_DATA_ERROR:
+        case Z_MEM_ERROR:
+          t.abort();
+          GunzipEnd();
+          return ret;
+        }
+        COND_RETURN(ret != Z_OK && ret != Z_STREAM_END, ret);
+        
+        *out_len += (CHUNK - stream_.avail_out);
+
+        if (ret == Z_STREAM_END) {
+          t.alter(State::Eos);
+          return ret;
+        }
+      } while (stream_.avail_out == 0);
+      data += CHUNK;
+      data_len -= CHUNK;
+    }
+    t.alter(State::Data);
+    return ret;
+  }
+
+
   void GunzipEnd() {
-    inflateEnd(&strm);
+    if (state_ != State::Idle) {
+      state_ = State::Idle;
+      inflateEnd(&stream_);
+    }
   }
 
  protected:
@@ -344,17 +381,17 @@ class Gunzip : public EventEmitter {
     return scope.Close(String::New(""));
   }
 
-  Gunzip () : EventEmitter () 
-  {
-  }
+  Gunzip() 
+    : EventEmitter(), state_(State::Idle)
+  {}
 
-  ~Gunzip ()
+  ~Gunzip()
   {
+    this->GunzipEnd();
   }
 
  private:
-
- z_stream strm;
-
+  z_stream stream_;
+  State::Value state_;
 };
 
