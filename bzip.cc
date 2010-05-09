@@ -34,97 +34,84 @@ class Bzip : public EventEmitter {
   }
 
   int BzipInit(int blockSize100k, int workFactor) {
-    int ret;
-    
-    if (blockSize100k < 1) {
-      blockSize100k = 1;
-    }
-    if (9 < blockSize100k) {
-      blockSize100k = 9;
-    }
-
-    if (workFactor < 0) {
-      workFactor = 0;
-    }
-    if (workFactor > 250) {
-      workFactor = 250;
-    }
+    COND_RETURN(state_ != State::Idle, BZ_SEQUENCE_ERROR);
 
     /* allocate deflate state */
-    strm.bzalloc = NULL;
-    strm.bzfree = NULL;
-    strm.opaque = NULL;
-    ret = BZ2_bzCompressInit(&strm, blockSize100k, 0, workFactor);
+    stream_.bzalloc = NULL;
+    stream_.bzfree = NULL;
+    stream_.opaque = NULL;
+
+    int ret = BZ2_bzCompressInit(&stream_, blockSize100k, 0, workFactor);
     if (ret == BZ_OK) {
-      is_allocated = true;
+      state_ = State::Data;
     }
     return ret;
   }
 
-  int BzipDeflate(char* data, int data_len, ScopedBlob &out, int* out_len) {
-    int ret;
-    char* temp;
 
+  int BzipDeflate(char *data, int data_len, ScopedBlob &out, int *out_len) {
     *out_len = 0;
+    COND_RETURN(state_ != State::Data, BZ_SEQUENCE_ERROR);
 
-    if (!is_allocated) {
-      return BZ_SEQUENCE_ERROR;
-    }
+    State::Transition t(state_, State::Error);
 
-    ret = 0;
+    int ret = BZ_OK;
     while (data_len > 0) {    
-      strm.avail_in = data_len;
-      strm.next_in = data;
+      COND_RETURN(!out.GrowBy(data_len + 1), BZ_MEM_ERROR);
+      
+      stream_.next_in = data;
+      stream_.next_out = out.data() + *out_len;
+      stream_.avail_in = data_len;
+      stream_.avail_out = data_len + 1;
 
-      if (!out.GrowBy(data_len + 1)) {
-        return BZ_MEM_ERROR;
-      }
-      strm.avail_out = data_len + 1;
-      strm.next_out = out.data() + *out_len;
-
-      ret = BZ2_bzCompress(&strm, BZ_RUN);
+      ret = BZ2_bzCompress(&stream_, BZ_RUN);
       assert(ret != BZ_SEQUENCE_ERROR);  /* state not clobbered */
-      *out_len += (data_len + 1 - strm.avail_out);
+      COND_RETURN(ret != BZ_RUN_OK, ret);
 
-      data += data_len - strm.avail_in;
-      data_len = strm.avail_in;
+      *out_len += (data_len + 1 - stream_.avail_out);
+      data += data_len - stream_.avail_in;
+      data_len = stream_.avail_in;
     }
-    return ret;
+    t.alter(State::Data);
+    return BZ_OK;
   }
 
 
-  int BzipEnd(ScopedBlob &out, int* out_len) {
-    // Don't expect this to be large as output buffer for deflate is as large
+  int BzipEnd(ScopedBlob &out, int *out_len) {
+    *out_len = 0;
+    COND_RETURN(state_ == State::Idle, BZ_OK);
+    assert(state_ == State::Data || state_ == State::Error);
+
+    State::Transition t(state_, State::Idle);
+
+    int ret = BZ_OK;
+    if (state_ == State::Data) {
+      ret = BzipEndWithData(out, out_len);
+    }
+
+    BZ2_bzCompressEnd(&stream_);
+    return ret;
+  }
+
+  int BzipEndWithData(ScopedBlob &out, int *out_len) {
+    // Don't expect data to be large as output buffer for deflate is as large
     // as input.
     const int Chunk = 128;
 
     int ret;
-    char* temp;
-
-    *out_len = 0;
-
-    if (!is_allocated) {
-      return BZ_SEQUENCE_ERROR;
-    }
-
-    strm.avail_in = 0;
-    strm.next_in = NULL;
-
     do {
-      if (!out.GrowBy(Chunk)) {
-        return BZ_MEM_ERROR;
-      }
-      strm.avail_out = Chunk;
-      strm.next_out = out.data() + *out_len;
+      COND_RETURN(!out.GrowBy(Chunk), BZ_MEM_ERROR);
+      
+      stream_.avail_out = Chunk;
+      stream_.next_out = out.data() + *out_len;
 
-      ret = BZ2_bzCompress(&strm, BZ_FINISH);
+      ret = BZ2_bzCompress(&stream_, BZ_FINISH);
       assert(ret != BZ_SEQUENCE_ERROR);  /* state not clobbered */
-      *out_len += (Chunk - strm.avail_out);
+      COND_RETURN(ret != BZ_FINISH_OK && ret != BZ_STREAM_END, ret);
+
+      *out_len += (Chunk - stream_.avail_out);
     } while (ret != BZ_STREAM_END);
-    
-    BZ2_bzCompressEnd(&strm);
-    is_allocated = false;
-    return ret;
+    return BZ_OK;
   }
 
 
@@ -223,21 +210,22 @@ class Bzip : public EventEmitter {
   }
 
 
-  Bzip () : EventEmitter () 
+  Bzip()
+    : EventEmitter(), state_(State::Idle)
   {
   }
 
-  ~Bzip ()
+  ~Bzip()
   {
-    if (is_allocated) {
-      BZ2_bzCompressEnd(&strm);
+    if (state_ != State::Idle) {
+      BZ2_bzCompressEnd(&stream_);
     }
   }
 
  private:
+  bz_stream stream_;
+  State::Value state_;
 
-  bz_stream strm;
-  bool is_allocated;
 };
 
 
@@ -261,65 +249,62 @@ class Bunzip : public EventEmitter {
   }
 
   int BunzipInit(int small) {
-    /* allocate inflate state */
-    strm.bzalloc = NULL;
-    strm.bzfree = NULL;
-    strm.opaque = NULL;
+    COND_RETURN(state_ != State::Idle, BZ_SEQUENCE_ERROR);
 
-    strm.avail_in = 0;
-    strm.next_in = NULL;
-    int ret = BZ2_bzDecompressInit(&strm, 0, small);
+    /* allocate inflate state */
+    stream_.bzalloc = NULL;
+    stream_.bzfree = NULL;
+    stream_.opaque = NULL;
+    stream_.avail_in = 0;
+    stream_.next_in = NULL;
+
+    int ret = BZ2_bzDecompressInit(&stream_, 0, small);
     if (ret == BZ_OK) {
-      is_allocated = true;
+      state_ = State::Data;
     }
     return ret;
   }
 
-  int BunzipInflate(const char* data, int data_len,
-                    ScopedBlob &out, int* out_len) {
-    int ret;
-    char* temp;
 
-    const int InflateRatio = 3;
-
+  int BunzipInflate(const char *data, int data_len,
+                    ScopedBlob &out, int *out_len) {
     *out_len = 0;
+    COND_RETURN(state_ == State::Eos, BZ_OK);
+    COND_RETURN(state_ != State::Data, BZ_SEQUENCE_ERROR);
 
-    if (!is_allocated) {
-      return BZ_SEQUENCE_ERROR;
-    }
+    int ret = BZ_OK;
 
-    ret = 0;
+    State::Transition t(state_, State::Error);
     while (data_len > 0) { 
-      strm.avail_in = data_len;
-      strm.next_in = (char*)data;
+      COND_RETURN(!out.GrowBy(data_len), BZ_MEM_ERROR);
 
-      if (!out.GrowBy(data_len * InflateRatio)) {
-        return BZ_MEM_ERROR;
-      }
-      strm.avail_out = data_len * InflateRatio;
-      strm.next_out = out.data() + *out_len;
+      stream_.next_in = (char*)data;
+      stream_.next_out = out.data() + *out_len;
+      stream_.avail_in = data_len;
+      stream_.avail_out = data_len;
 
-      ret = BZ2_bzDecompress(&strm);
+      ret = BZ2_bzDecompress(&stream_);
       assert(ret != BZ_SEQUENCE_ERROR);  /* state not clobbered */
-      *out_len += data_len * InflateRatio - strm.avail_out;
-      data += data_len - strm.avail_in;
-      data_len = strm.avail_in;
+      COND_RETURN(ret != BZ_OK && ret != BZ_STREAM_END, ret);
 
-      if (ret != BZ_OK) {
-        if (ret == BZ_STREAM_END) {
-          BunzipEnd();
-        }
+      *out_len += data_len - stream_.avail_out;
+      data += data_len - stream_.avail_in;
+      data_len = stream_.avail_in;
+
+      if (ret == BZ_STREAM_END) {
+        t.alter(State::Eos);
         return ret;
       }
     }
+    t.alter(State::Data);
     return ret;
   }
 
 
   void BunzipEnd() {
-    if (is_allocated) {
-      BZ2_bzDecompressEnd(&strm);
-      is_allocated = false;
+    if (state_ != State::Idle) {
+      state_ = State::Idle;
+      BZ2_bzDecompressEnd(&stream_);
     }
   }
 
@@ -388,9 +373,9 @@ class Bunzip : public EventEmitter {
     return scope.Close(String::New(""));
   }
 
-  Bunzip () : EventEmitter () 
-  {
-  }
+  Bunzip()
+    : EventEmitter(), state_(State::Idle)
+  {}
 
   ~Bunzip ()
   {
@@ -398,9 +383,8 @@ class Bunzip : public EventEmitter {
   }
 
  private:
-
-  bz_stream strm;
-  bool is_allocated;
+  bz_stream stream_;
+  State::Value state_;
 
 };
 
