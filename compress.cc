@@ -1,8 +1,10 @@
 #include <node.h>
 
+#ifdef WITH_GZIP
 #include "gzip.cc"
+#endif
 
-#ifndef COMPRESS_WITHOUT_BZIP
+#ifdef WITH_BZIP
 #include "bzip.cc"
 #endif
 
@@ -10,11 +12,15 @@ extern "C" void
 init (Handle<Object> target) 
 {
   HandleScope scope;
+
+#ifdef WITH_GZIP
   Gzip::Initialize(target);
   Gunzip::Initialize(target);
+#endif
 
-#ifndef COMPRESS_WITHOUT_BZIP
+#ifdef WITH_BZIP
   Bzip::Initialize(target);
   Bunzip::Initialize(target);
 #endif
 }
+
