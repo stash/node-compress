@@ -9,15 +9,89 @@
 #undef BZ_NO_STDIO
 
 #include "utils.h"
+#include "zlib.h"
 
 using namespace v8;
 using namespace node;
 
 
-class Bzip : public EventEmitter {
+class BzipUtils {
  public:
-  static void
-  Initialize (v8::Handle<v8::Object> target)
+  typedef ScopedBlob Blob;
+
+
+  static bool IsError(int bzipStatus) {
+    return !(bzipStatus == BZ_OK ||
+        bzipStatus == BZ_RUN_OK ||
+        bzipStatus == BZ_FLUSH_OK ||
+        bzipStatus == BZ_FINISH_OK ||
+        bzipStatus == BZ_STREAM_END);
+  }
+
+
+  static Local<Value> GetException(int bzipStatus) {
+    if (!IsError(bzipStatus)) {
+      return Local<Value>::New(Undefined());
+    } else {
+      switch (bzipStatus) {
+        case BZ_CONFIG_ERROR:
+          return Exception::Error(String::New(ConfigError));
+        case BZ_SEQUENCE_ERROR:
+          return Exception::Error(String::New(SequenceError));
+        case BZ_PARAM_ERROR:
+          return Exception::Error(String::New(ParamError));
+        case BZ_MEM_ERROR:
+          return Exception::Error(String::New(MemError));
+        case BZ_DATA_ERROR:
+          return Exception::Error(String::New(DataError));
+        case BZ_DATA_ERROR_MAGIC:
+          return Exception::Error(String::New(DataErrorMagic));
+        case BZ_IO_ERROR:
+          return Exception::Error(String::New(IoError));
+        case BZ_UNEXPECTED_EOF:
+          return Exception::Error(String::New(UnexpectedEof));
+        case BZ_OUTBUFF_FULL:
+          return Exception::Error(String::New(OutbuffFull));
+
+        default:
+          return Exception::Error(String::New("Unknown error"));
+      }
+    }
+  }
+
+ private:
+  static const char ConfigError[];
+  static const char SequenceError[];
+  static const char ParamError[];
+  static const char MemError[];
+  static const char DataError[];
+  static const char DataErrorMagic[];
+  static const char IoError[];
+  static const char UnexpectedEof[];
+  static const char OutbuffFull[];
+};
+
+
+const char BzipUtils::ConfigError[] = "Library configuration error.";
+const char BzipUtils::SequenceError[] = "Call sequence error.";
+const char BzipUtils::ParamError[] = "Invalid arguments.";
+const char BzipUtils::MemError[] = "Out of memory.";
+const char BzipUtils::DataError[] = "Data integrity error.";
+const char BzipUtils::DataErrorMagic[] = "BZip magic not found.";
+const char BzipUtils::IoError[] = "Input/output error.";
+const char BzipUtils::UnexpectedEof[] = "Unexpected end of file.";
+const char BzipUtils::OutbuffFull[] = "Output buffer full.";
+
+
+class Bzip : public EventEmitter {
+  friend class ZipLib<Bzip>;
+  typedef BzipUtils Utils;
+  typedef BzipUtils::Blob Blob;
+
+  typedef ZipLib<Bzip> BzipLib;
+
+ public:
+  static void Initialize(v8::Handle<v8::Object> target)
   {
     HandleScope scope;
 
@@ -26,13 +100,15 @@ class Bzip : public EventEmitter {
     t->Inherit(EventEmitter::constructor_template);
     t->InstanceTemplate()->SetInternalFieldCount(1);
 
-    NODE_SET_PROTOTYPE_METHOD(t, "init", BzipInit);
-    NODE_SET_PROTOTYPE_METHOD(t, "deflate", BzipDeflate);
-    NODE_SET_PROTOTYPE_METHOD(t, "end", BzipEnd);
+    NODE_SET_PROTOTYPE_METHOD(t, "write", BzipWrite);
+    NODE_SET_PROTOTYPE_METHOD(t, "close", BzipClose);
+    NODE_SET_PROTOTYPE_METHOD(t, "destroy", BzipDestroy);
 
     target->Set(String::NewSymbol("Bzip"), t->GetFunction());
   }
 
+
+ private:
   int BzipInit(int blockSize100k, int workFactor) {
     COND_RETURN(state_ != State::Idle, BZ_SEQUENCE_ERROR);
 
@@ -49,7 +125,7 @@ class Bzip : public EventEmitter {
   }
 
 
-  int BzipDeflate(char *data, int data_len, ScopedBlob &out, int *out_len) {
+  int Write(char *data, int data_len, Blob &out, int *out_len) {
     *out_len = 0;
     COND_RETURN(state_ != State::Data, BZ_SEQUENCE_ERROR);
 
@@ -77,23 +153,33 @@ class Bzip : public EventEmitter {
   }
 
 
-  int BzipEnd(ScopedBlob &out, int *out_len) {
+  int Close(Blob &out, int *out_len) {
     *out_len = 0;
     COND_RETURN(state_ == State::Idle, BZ_OK);
     assert(state_ == State::Data || state_ == State::Error);
 
-    State::Transition t(state_, State::Idle);
+    State::Transition t(state_, State::Error);
 
     int ret = BZ_OK;
     if (state_ == State::Data) {
       ret = BzipEndWithData(out, out_len);
     }
 
-    BZ2_bzCompressEnd(&stream_);
+    t.abort();
+    this->Destroy();
     return ret;
   }
 
-  int BzipEndWithData(ScopedBlob &out, int *out_len) {
+
+  void Destroy() {
+    if (state_ != State::Idle) {
+      state_ = State::Idle;
+      BZ2_bzCompressEnd(&stream_);
+    }
+  }
+
+
+  int BzipEndWithData(Blob &out, int *out_len) {
     // Don't expect data to be large as output buffer for deflate is as large
     // as input.
     const int Chunk = 128;
@@ -116,24 +202,12 @@ class Bzip : public EventEmitter {
 
 
  protected:
-
-  static Handle<Value>
-  New (const Arguments& args)
+  static Handle<Value> New(const Arguments& args)
   {
     HandleScope scope;
 
     Bzip *bzip = new Bzip();
     bzip->Wrap(args.This());
-
-    return args.This();
-  }
-
-  static Handle<Value>
-  BzipInit (const Arguments& args)
-  {
-    Bzip *bzip = ObjectWrap::Unwrap<Bzip>(args.This());
-
-    HandleScope scope;
 
     int blockSize100k = 1;
     int workFactor = 0;
@@ -156,71 +230,35 @@ class Bzip : public EventEmitter {
       workFactor = args[1]->Int32Value();
     }
     int r = bzip->BzipInit(blockSize100k, workFactor);
-    return scope.Close(Integer::New(r));
+    return BzipLib::ReturnThisOrThrow(args, r);
   }
 
-  static Handle<Value>
-  BzipDeflate(const Arguments& args) {
-    Bzip *bzip = ObjectWrap::Unwrap<Bzip>(args.This());
 
-    HandleScope scope;
-
-    enum encoding enc = ParseEncoding(args[1]);
-    ssize_t len = DecodeBytes(args[0], enc);
-
-    if (len < 0) {
-      Local<Value> exception = Exception::TypeError(
-          String::New("Bad argument"));
-      return ThrowException(exception);
-    }
-    ScopedArray<char> buf(len);
-    ssize_t written = DecodeWrite(buf.data(), len, args[0], enc);
-    assert(written == len);
-
-    ScopedBlob out;
-    int out_size;
-    int r = bzip->BzipDeflate(buf.data(), len, out, &out_size);
-
-    if (out_size==0) {
-      return scope.Close(String::New(""));
-    }
-
-    Local<Value> outString = Encode(out.data(), out_size, BINARY);
-    return scope.Close(outString);
+  static Handle<Value> BzipWrite(const Arguments &args) {
+    return BzipLib::Write(args);
   }
 
-  static Handle<Value>
-  BzipEnd(const Arguments& args) {
-    Bzip *bzip = ObjectWrap::Unwrap<Bzip>(args.This());
 
-    HandleScope scope;
+  static Handle<Value> BzipClose(const Arguments &args) {
+    return BzipLib::Close(args);
+  }
 
-    ScopedBlob out;
-    int out_size;
-    if (args.Length() > 0 && args[0]->IsString()) {
-      String::Utf8Value format_type(args[1]->ToString());
-    }  
 
-    int r = bzip->BzipEnd(out, &out_size);
-    if (out_size==0) {
-      return String::New("");
-    }
-    Local<Value> outString = Encode(out.data(), out_size, BINARY);
-    return scope.Close(outString);
+  static Handle<Value> BzipDestroy(const Arguments &args) {
+    return BzipLib::Destroy(args);
   }
 
 
   Bzip()
     : EventEmitter(), state_(State::Idle)
-  {
-  }
+  {}
+
 
   ~Bzip()
   {
-    if (state_ != State::Idle) {
-      BZ2_bzCompressEnd(&stream_);
-    }
+    this->Destroy();
   }
+
 
  private:
   bz_stream stream_;
@@ -230,9 +268,14 @@ class Bzip : public EventEmitter {
 
 
 class Bunzip : public EventEmitter {
+  friend class ZipLib<Bunzip>;
+  typedef BzipUtils Utils;
+  typedef BzipUtils::Blob Blob;
+
+  typedef ZipLib<Bunzip> BzipLib;
+
  public:
-  static void
-  Initialize (v8::Handle<v8::Object> target)
+  static void Initialize (v8::Handle<v8::Object> target)
   {
     HandleScope scope;
 
@@ -241,9 +284,9 @@ class Bunzip : public EventEmitter {
     t->Inherit(EventEmitter::constructor_template);
     t->InstanceTemplate()->SetInternalFieldCount(1);
 
-    NODE_SET_PROTOTYPE_METHOD(t, "init", BunzipInit);
-    NODE_SET_PROTOTYPE_METHOD(t, "inflate", BunzipInflate);
-    NODE_SET_PROTOTYPE_METHOD(t, "end", BunzipEnd);
+    NODE_SET_PROTOTYPE_METHOD(t, "write", BunzipWrite);
+    NODE_SET_PROTOTYPE_METHOD(t, "close", BunzipClose);
+    NODE_SET_PROTOTYPE_METHOD(t, "destroy", BunzipDestroy);
 
     target->Set(String::NewSymbol("Bunzip"), t->GetFunction());
   }
@@ -266,8 +309,7 @@ class Bunzip : public EventEmitter {
   }
 
 
-  int BunzipInflate(const char *data, int data_len,
-                    ScopedBlob &out, int *out_len) {
+  int Write(const char *data, int data_len, Blob &out, int *out_len) {
     *out_len = 0;
     COND_RETURN(state_ == State::Eos, BZ_OK);
     COND_RETURN(state_ != State::Data, BZ_SEQUENCE_ERROR);
@@ -301,7 +343,13 @@ class Bunzip : public EventEmitter {
   }
 
 
-  void BunzipEnd() {
+  int Close(Blob &out, int *out_len) {
+    *out_len = 0;
+    return BZ_OK;
+  }
+
+
+  void Destroy() {
     if (state_ != State::Idle) {
       state_ = State::Idle;
       BZ2_bzDecompressEnd(&stream_);
@@ -309,22 +357,11 @@ class Bunzip : public EventEmitter {
   }
 
  protected:
-
-  static Handle<Value>
-  New(const Arguments& args) {
+  static Handle<Value> New(const Arguments& args) {
     HandleScope scope;
 
     Bunzip *bunzip = new Bunzip();
     bunzip->Wrap(args.This());
-
-    return args.This();
-  }
-
-  static Handle<Value>
-  BunzipInit(const Arguments& args) {
-    Bunzip *bunzip = ObjectWrap::Unwrap<Bunzip>(args.This());
-
-    HandleScope scope;
 
     int small = 0;
     if (args.Length() > 0 && !args[0]->IsUndefined()) {
@@ -332,55 +369,35 @@ class Bunzip : public EventEmitter {
     }
     int r = bunzip->BunzipInit(small);
 
-    return scope.Close(Integer::New(r));
+    return BzipLib::ReturnThisOrThrow(args, r);
   }
 
 
-  static Handle<Value>
-  BunzipInflate(const Arguments& args) {
-    Bunzip *bunzip = ObjectWrap::Unwrap<Bunzip>(args.This());
-
-    HandleScope scope;
-
-    enum encoding enc = ParseEncoding(args[1]);
-    ssize_t len = DecodeBytes(args[0], enc);
-
-    if (len < 0) {
-      Local<Value> exception = Exception::TypeError(String::New("Bad argument"));
-      return ThrowException(exception);
-    }
-
-    ScopedArray<char> buf(len);
-    ssize_t written = DecodeWrite(buf.data(), len, args[0], BINARY);
-    assert(written == len);
-
-    ScopedBlob out;
-    int out_size;
-    int r = bunzip->BunzipInflate(buf.data(), len, out, &out_size);
-
-    Local<Value> outString = Encode(out.data(), out_size, enc);
-    return scope.Close(outString);
+  static Handle<Value> BunzipWrite(const Arguments& args) {
+    return BzipLib::Write(args);
   }
 
-  static Handle<Value>
-  BunzipEnd(const Arguments& args) {
-    Bunzip *bunzip = ObjectWrap::Unwrap<Bunzip>(args.This());
 
-    HandleScope scope;
-
-    bunzip->BunzipEnd();
-
-    return scope.Close(String::New(""));
+  static Handle<Value> BunzipClose(const Arguments& args) {
+    return BzipLib::Close(args);
   }
+
+
+  static Handle<Value> BunzipDestroy(const Arguments& args) {
+    return BzipLib::Destroy(args);
+  }
+
 
   Bunzip()
     : EventEmitter(), state_(State::Idle)
   {}
 
+
   ~Bunzip ()
   {
-    this->BunzipEnd();
+    this->Destroy();
   }
+
 
  private:
   bz_stream stream_;
