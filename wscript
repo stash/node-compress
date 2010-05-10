@@ -39,8 +39,8 @@ def configure(conf):
 
 def build(bld):
   obj = bld.new_task_gen("cxx", "shlib", "node_addon")
-  obj.target = "compress"
-  obj.source = "compress.cc"
+  obj.target = "compress-bindings"
+  obj.source = "src/compress.cc"
   obj.defines = bld.env.DEFINES
   obj.uselib = bld.env.USELIB
   
