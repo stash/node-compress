@@ -75,6 +75,13 @@ class GzipLib {
     }
   }
 
+  
+  static Handle<Value> ThrowCallbackExpected() {
+    Local<Value> exception = Exception::TypeError(
+        String::New("Callback must be a function"));
+    return ThrowException(exception);
+  }
+
 
  private:
   static const char NeedDictionary[];
@@ -111,7 +118,8 @@ class Gzip : public EventEmitter {
     t->InstanceTemplate()->SetInternalFieldCount(1);
 
     NODE_SET_PROTOTYPE_METHOD(t, "write", GzipDeflate);
-    NODE_SET_PROTOTYPE_METHOD(t, "end", GzipEnd);
+    NODE_SET_PROTOTYPE_METHOD(t, "close", GzipEnd);
+    NODE_SET_PROTOTYPE_METHOD(t, "destroy", GzipDestroy);
 
     target->Set(String::NewSymbol("Gzip"), t->GetFunction());
   }
@@ -177,14 +185,23 @@ class Gzip : public EventEmitter {
     COND_RETURN(state_ == State::Idle, Z_OK);
     assert(state_ == State::Data || state_ == State::Error);
 
-    State::Transition t(state_, State::Idle);
+    State::Transition t(state_, State::Error);
     int ret = Z_OK;
     if (state_ == State::Data) {
       ret = GzipEndWithData(out, out_len);
     }
 
-    deflateEnd(&stream_);
+    t.abort();
+    this->GzipDestroy();
     return ret;
+  }
+
+
+  void GzipDestroy() {
+    State::Transition t(state_, State::Idle);
+    if (state_ != State::Idle) {
+      deflateEnd(&stream_);
+    }
   }
 
 
@@ -247,36 +264,18 @@ class Gzip : public EventEmitter {
 
     Buffer *buffer = ObjectWrap::Unwrap<Buffer>(args[0]->ToObject());
 
-    Local<Value> cb(Local<Value>::New(Undefined()));
+    Local<Value> cb(args[1]);
     if (args.Length() > 1 && !args[1]->IsUndefined()) {
       if (!args[1]->IsFunction()) {
-        Local<Value> exception = Exception::TypeError(
-            String::New("Callback must be a function"));
-        return ThrowException(exception);
+        return GzipLib::ThrowCallbackExpected();
       }
-      cb = args[1];
     }
 
     ScopedBytesBlob out;
     int out_size;
     int r = gzip->GzipDeflate(buffer->data(), buffer->length(), out, &out_size);
 
-    Local<Value> outString = Encode(out.data(), out_size, BINARY);
-    if (cb->IsFunction()) {
-      Function *fun = Function::Cast(*cb);
-
-      Local<Value> argv[2];
-      argv[0] = GzipLib::GetException(r);
-      argv[1] = outString;
-
-      TryCatch try_catch;
-
-      fun->Call(Context::GetCurrent()->Global(), 2, argv);
-
-      if (try_catch.HasCaught()) {
-        FatalException(try_catch);
-      }
-    }
+    DoCallback(cb, r, out, out_size);
     return Undefined();
   }
 
@@ -286,23 +285,49 @@ class Gzip : public EventEmitter {
 
     HandleScope scope;
 
-    ScopedBytesBlob out;
-    int out_size;
-    bool hex_format = false;
-
-    if (args.Length() > 0 && args[0]->IsString()) {
-      String::Utf8Value format_type(args[1]->ToString());
+    Local<Value> cb(args[0]);
+    if (args.Length() > 0 && !args[0]->IsUndefined()) {
+      if (!args[0]->IsFunction()) {
+        return GzipLib::ThrowCallbackExpected();
+      }
     }  
 
-    int r = gzip->GzipEnd(out, &out_size);
+    ScopedBytesBlob out;
+    int out_size;
 
-    if (out_size==0) {
-      return String::New("");
-    }
-    Local<Value> outString = Encode(out.data(), out_size, BINARY);
-    return scope.Close(outString);
+    int r = gzip->GzipEnd(out, &out_size);
+    DoCallback(cb, r, out, out_size);
+
+    return Undefined();
+  }
+  
+
+  static Handle<Value>
+  GzipDestroy(const Arguments& args) {
+    Gzip *gzip = ObjectWrap::Unwrap<Gzip>(args.This());
+    gzip->GzipDestroy();
+
+    return Undefined();
   }
 
+
+  static void
+  DoCallback(Local<Value> &cb, int r, ScopedBytesBlob &out, int out_size) {
+    if (cb->IsFunction()) {
+      Local<Value> argv[2];
+      argv[0] = GzipLib::GetException(r);
+      argv[1] = Encode(out.data(), out_size, BINARY);
+
+      TryCatch try_catch;
+
+      Function *fun = Function::Cast(*cb);
+      fun->Call(Context::GetCurrent()->Global(), 2, argv);
+
+      if (try_catch.HasCaught()) {
+        FatalException(try_catch);
+      }
+    }
+  }
 
   Gzip() 
     : EventEmitter(), state_(State::Idle)
