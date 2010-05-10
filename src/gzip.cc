@@ -80,8 +80,7 @@ class Gzip : public EventEmitter {
   typedef ZipLib<Gzip> GzipLib;
 
  public:
-  static void
-  Initialize (v8::Handle<v8::Object> target)
+  static void Initialize(v8::Handle<v8::Object> target)
   {
     HandleScope scope;
 
@@ -115,8 +114,7 @@ class Gzip : public EventEmitter {
   }
 
 
-  int Write(char *data, int data_len,
-                  Blob &out, int* out_len) {
+  int Write(char *data, int data_len, Blob &out, int *out_len) {
     *out_len = 0;
     COND_RETURN(state_ != State::Data, Z_STREAM_ERROR);
 
@@ -200,9 +198,7 @@ class Gzip : public EventEmitter {
 
 
  protected:
-
-  static Handle<Value>
-  New (const Arguments& args)
+  static Handle<Value> New(const Arguments& args)
   {
     HandleScope scope;
 
@@ -223,19 +219,16 @@ class Gzip : public EventEmitter {
     return GzipLib::ReturnThisOrThrow(args, r);
   }
 
-  static Handle<Value>
-  GzipWrite(const Arguments& args) {
+  static Handle<Value> GzipWrite(const Arguments& args) {
     return GzipLib::Write(args);
   }
 
-  static Handle<Value>
-  GzipClose(const Arguments& args) {
+  static Handle<Value> GzipClose(const Arguments& args) {
     return GzipLib::Close(args);
   }
   
 
-  static Handle<Value>
-  GzipDestroy(const Arguments& args) {
+  static Handle<Value> GzipDestroy(const Arguments& args) {
     return GzipLib::Destroy(args);
   }
 
@@ -243,6 +236,7 @@ class Gzip : public EventEmitter {
   Gzip() 
     : EventEmitter(), state_(State::Idle)
   {}
+
 
   ~Gzip()
   {
@@ -263,8 +257,7 @@ class Gunzip : public EventEmitter {
   typedef ZipLib<Gunzip> GzipLib;
 
  public:
-  static void
-  Initialize (v8::Handle<v8::Object> target)
+  static void Initialize(v8::Handle<v8::Object> target)
   {
     HandleScope scope;
 
@@ -299,8 +292,7 @@ class Gunzip : public EventEmitter {
   }
 
 
-  int Write(const char* data, int data_len,
-                    Blob &out, int* out_len) {
+  int Write(const char* data, int data_len, Blob &out, int *out_len) {
     *out_len = 0;
     COND_RETURN(state_ == State::Eos, Z_OK);
     COND_RETURN(state_ != State::Data, Z_STREAM_ERROR);
@@ -357,6 +349,7 @@ class Gunzip : public EventEmitter {
     return Z_OK;
   }
 
+
   void Destroy() {
     if (state_ != State::Idle) {
       state_ = State::Idle;
@@ -365,9 +358,7 @@ class Gunzip : public EventEmitter {
   }
 
  protected:
-
-  static Handle<Value>
-  New(const Arguments& args) {
+  static Handle<Value> New(const Arguments& args) {
     HandleScope scope;
 
     Gunzip *gunzip = new Gunzip();
@@ -378,24 +369,25 @@ class Gunzip : public EventEmitter {
   }
 
 
-  static Handle<Value>
-  GunzipWrite(const Arguments& args) {
+  static Handle<Value> GunzipWrite(const Arguments& args) {
     return GzipLib::Write(args);
   }
 
-  static Handle<Value>
-  GunzipClose(const Arguments& args) {
+
+  static Handle<Value> GunzipClose(const Arguments& args) {
     return GzipLib::Close(args);
   }
 
-  static Handle<Value>
-  GunzipDestroy(const Arguments& args) {
+
+  static Handle<Value> GunzipDestroy(const Arguments& args) {
     return GzipLib::Destroy(args);
   }
+
 
   Gunzip() 
     : EventEmitter(), state_(State::Idle)
   {}
+
 
   ~Gunzip()
   {
