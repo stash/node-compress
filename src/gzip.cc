@@ -7,47 +7,22 @@
 #include <zlib.h>
 
 #include "utils.h"
+#include "zlib.h"
 
 #define CHUNK 16384
 
 using namespace v8;
 using namespace node;
 
-typedef ScopedOutputBuffer<Bytef> ScopedBytesBlob;
-
-class GzipLib {
+class GzipUtils {
  public:
-  static Handle<Value> ReturnThisOrThrow(const Local<Object> &self,
-                                         int gzipStatus) {
-    if (!IsError(gzipStatus)) {
-      return self;
-    } else {
-      return ThrowError(gzipStatus);
-    }
-  }
-
-
-  static Handle<Value> ReturnOrThrow(HandleScope &scope,
-                                     const Local<Value> &value,
-                                     int gzipStatus) {
-    if (!IsError(gzipStatus)) {
-      return scope.Close(value);
-    } else {
-      return ThrowError(gzipStatus);
-    }
-  }
+  typedef ScopedOutputBuffer<Bytef> Blob;
 
 
   static bool IsError(int gzipStatus) {
     return !(gzipStatus == Z_OK || gzipStatus == Z_STREAM_END);
   }
 
-
-  static Handle<Value> ThrowError(int gzipStatus) {
-    assert(IsError(gzipStatus));
-
-    return ThrowException(GetException(gzipStatus));
-  }
 
   static Local<Value> GetException(int gzipStatus) {
     if (!IsError(gzipStatus)) {
@@ -75,92 +50,6 @@ class GzipLib {
     }
   }
 
-  
-  static Handle<Value> ThrowCallbackExpected() {
-    Local<Value> exception = Exception::TypeError(
-        String::New("Callback must be a function"));
-    return ThrowException(exception);
-  }
-
-
-  template <class Processor>
-  static Handle<Value> Write(const Arguments& args) {
-    Processor *proc = ObjectWrap::Unwrap<Processor>(args.This());
-
-    HandleScope scope;
-
-    if (!Buffer::HasInstance(args[0])) {
-      Local<Value> exception = Exception::TypeError(
-          String::New("Input must be of type Buffer"));
-      return ThrowException(exception);
-    }
-
-    Buffer *buffer = ObjectWrap::Unwrap<Buffer>(args[0]->ToObject());
-
-    Local<Value> cb(args[1]);
-    if (args.Length() > 1 && !args[1]->IsUndefined()) {
-      if (!args[1]->IsFunction()) {
-        return GzipLib::ThrowCallbackExpected();
-      }
-    }
-
-    typename Processor::Blob out;
-    int out_size;
-    int r = proc->Write(buffer->data(), buffer->length(), out, &out_size);
-
-    DoCallback(cb, r, out, out_size);
-    return Undefined();
-  }
-
-
-  template <class Processor>
-  static Handle<Value> Close(const Arguments& args) {
-    Processor *proc = ObjectWrap::Unwrap<Processor>(args.This());
-
-    HandleScope scope;
-
-    Local<Value> cb(args[0]);
-    if (args.Length() > 0 && !args[0]->IsUndefined()) {
-      if (!args[0]->IsFunction()) {
-        return GzipLib::ThrowCallbackExpected();
-      }
-    }  
-
-    typename Processor::Blob out;
-    int out_size;
-
-    int r = proc->Close(out, &out_size);
-    DoCallback(cb, r, out, out_size);
-
-    return Undefined();
-  }
-
-  template <class Processor>
-  static Handle<Value> Destroy(const Arguments& args) {
-    Processor *proc = ObjectWrap::Unwrap<Processor>(args.This());
-    proc->Destroy();
-
-    return Undefined();
-  }
-
-  static void DoCallback(Local<Value> &cb,
-      int r, ScopedBytesBlob &out, int out_size) {
-    if (cb->IsFunction()) {
-      Local<Value> argv[2];
-      argv[0] = GzipLib::GetException(r);
-      argv[1] = Encode(out.data(), out_size, BINARY);
-
-      TryCatch try_catch;
-
-      Function *fun = Function::Cast(*cb);
-      fun->Call(Context::GetCurrent()->Global(), 2, argv);
-
-      if (try_catch.HasCaught()) {
-        FatalException(try_catch);
-      }
-    }
-  }
-
  private:
   static const char NeedDictionary[];
   static const char Errno[];
@@ -171,21 +60,24 @@ class GzipLib {
   static const char VersionError[];
 };
 
-const char GzipLib::NeedDictionary[] = "Dictionary must be specified. "
+const char GzipUtils::NeedDictionary[] = "Dictionary must be specified. "
   "Currently this is unsupported by library.";
-const char GzipLib::Errno[] = "Z_ERRNO: Input/output error.";
-const char GzipLib::StreamError[] = "Z_STREAM_ERROR: Invalid arguments or "
+const char GzipUtils::Errno[] = "Z_ERRNO: Input/output error.";
+const char GzipUtils::StreamError[] = "Z_STREAM_ERROR: Invalid arguments or "
   "stream state is inconsistent.";
-const char GzipLib::DataError[] = "Z_DATA_ERROR: Input data corrupted.";
-const char GzipLib::MemError[] = "Z_MEM_ERROR: Out of memory.";
-const char GzipLib::BufError[] = "Z_BUF_ERROR: Buffer error.";
-const char GzipLib::VersionError[] = "Z_VERSION_ERROR: "
+const char GzipUtils::DataError[] = "Z_DATA_ERROR: Input data corrupted.";
+const char GzipUtils::MemError[] = "Z_MEM_ERROR: Out of memory.";
+const char GzipUtils::BufError[] = "Z_BUF_ERROR: Buffer error.";
+const char GzipUtils::VersionError[] = "Z_VERSION_ERROR: "
   "Invalid library version.";
 
 
 class Gzip : public EventEmitter {
-  friend class GzipLib;
-  typedef ScopedBytesBlob Blob;
+  friend class ZipLib<Gzip>;
+  typedef GzipUtils Utils;
+  typedef GzipUtils::Blob Blob;
+
+  typedef ZipLib<Gzip> GzipLib;
 
  public:
   static void
@@ -224,7 +116,7 @@ class Gzip : public EventEmitter {
 
 
   int Write(char *data, int data_len,
-                  ScopedBytesBlob &out, int* out_len) {
+                  Blob &out, int* out_len) {
     *out_len = 0;
     COND_RETURN(state_ != State::Data, Z_STREAM_ERROR);
 
@@ -261,7 +153,7 @@ class Gzip : public EventEmitter {
   }
 
 
-  int Close(ScopedBytesBlob &out, int *out_len) {
+  int Close(Blob &out, int *out_len) {
     *out_len = 0;
     COND_RETURN(state_ == State::Idle, Z_OK);
     assert(state_ == State::Data || state_ == State::Error);
@@ -286,7 +178,7 @@ class Gzip : public EventEmitter {
   }
 
 
-  int GzipEndWithData(ScopedBytesBlob &out, int *out_len) {
+  int GzipEndWithData(Blob &out, int *out_len) {
     int ret;
 
     stream_.avail_in = 0;
@@ -328,23 +220,23 @@ class Gzip : public EventEmitter {
     gzip->Wrap(args.This());
 
     int r = gzip->GzipInit(level);
-    return GzipLib::ReturnThisOrThrow(args.This(), r);
+    return GzipLib::ReturnThisOrThrow(args, r);
   }
 
   static Handle<Value>
   GzipWrite(const Arguments& args) {
-    return GzipLib::Write<Gzip>(args);
+    return GzipLib::Write(args);
   }
 
   static Handle<Value>
   GzipClose(const Arguments& args) {
-    return GzipLib::Close<Gzip>(args);
+    return GzipLib::Close(args);
   }
   
 
   static Handle<Value>
   GzipDestroy(const Arguments& args) {
-    return GzipLib::Destroy<Gzip>(args);
+    return GzipLib::Destroy(args);
   }
 
 
@@ -365,8 +257,10 @@ class Gzip : public EventEmitter {
 
 
 class Gunzip : public EventEmitter {
-  friend class GzipLib;
-  typedef ScopedBytesBlob Blob;
+  friend class ZipLib<Gunzip>;
+  typedef GzipUtils Utils;
+  typedef GzipUtils::Blob Blob;
+  typedef ZipLib<Gunzip> GzipLib;
 
  public:
   static void
@@ -406,7 +300,7 @@ class Gunzip : public EventEmitter {
 
 
   int Write(const char* data, int data_len,
-                    ScopedBytesBlob &out, int* out_len) {
+                    Blob &out, int* out_len) {
     *out_len = 0;
     COND_RETURN(state_ == State::Eos, Z_OK);
     COND_RETURN(state_ != State::Data, Z_STREAM_ERROR);
@@ -457,7 +351,7 @@ class Gunzip : public EventEmitter {
   }
 
 
-  int Close(ScopedBytesBlob &out, int *out_len) {
+  int Close(Blob &out, int *out_len) {
     *out_len = 0;
     this->Destroy();
     return Z_OK;
@@ -480,23 +374,23 @@ class Gunzip : public EventEmitter {
     gunzip->Wrap(args.This());
 
     int r = gunzip->GunzipInit();
-    return GzipLib::ReturnThisOrThrow(args.This(), r);
+    return GzipLib::ReturnThisOrThrow(args, r);
   }
 
 
   static Handle<Value>
   GunzipWrite(const Arguments& args) {
-    return GzipLib::Write<Gunzip>(args);
+    return GzipLib::Write(args);
   }
 
   static Handle<Value>
   GunzipClose(const Arguments& args) {
-    return GzipLib::Close<Gunzip>(args);
+    return GzipLib::Close(args);
   }
 
   static Handle<Value>
   GunzipDestroy(const Arguments& args) {
-    return GzipLib::Destroy<Gunzip>(args);
+    return GzipLib::Destroy(args);
   }
 
   Gunzip() 
