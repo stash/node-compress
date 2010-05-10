@@ -145,8 +145,16 @@ class Gzip : public EventEmitter {
     Gzip *gzip = ObjectWrap::Unwrap<Gzip>(args.This());
 
     HandleScope scope;
+    int level = Z_DEFAULT_COMPRESSION;
+    if (args.Length() > 0 && !args[0]->IsUndefined()) {
+      if (!args[0]->IsInt32()) {
+        Local<Value> exception = Exception::TypeError(
+            String::New("level must be an integer"));
+        return ThrowException(exception);
+      }
+      level = args[0]->Int32Value();
+    }
 
-    int level=Z_DEFAULT_COMPRESSION;
     int r = gzip->GzipInit(level);
     return scope.Close(Integer::New(r));
   }
