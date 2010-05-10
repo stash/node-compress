@@ -1,9 +1,19 @@
-var compress=require("./compress");
+var compress=require("../compress-bindings");
 var sys=require("sys");
 var posix=require("fs");
+var Buffer = require('buffer').Buffer;
+
+function createBuffer(str, enc) {
+  enc = enc || 'utf8';
+  var len = Buffer.byteLength(str, enc);
+  var buf = new Buffer(len);
+  buf.write(str, enc, 0);
+  return buf;
+}
+
 
 // Read in our test file
-var data=posix.readFileSync("bzfiletest.js", encoding="binary");
+var data=posix.readFileSync("tests/bzfiletest.js", encoding="binary");
 sys.puts("Got : "+data.length);
 
 // Set output file
@@ -12,30 +22,39 @@ var fd = posix.openSync("bzfiletest.js.bz2",
 sys.puts("Openned file");
 
 // Create bzip stream
-var bzip=new compress.Bzip;
-bzip.init();
+var bzip=new compress.Bzip();
 
 // Pump data to be compressed
-gzdata=bzip.deflate(data, "binary");  // Do this as many times as required
-sys.puts("Compressed size : "+gzdata.length);
-posix.writeSync(fd, gzdata, encoding="binary");
+var bzdata, bzlast;
+bzip.write(createBuffer(data, "binary"), function(err, data) {
+  bzdata = data;
+});
+sys.puts("Compressed size : "+bzdata.length);
+posix.writeSync(fd, bzdata, encoding="binary");
 
 // Get the last bit
-gzlast=bzip.end();
-sys.puts("Last bit : "+gzlast.length);
-posix.writeSync(fd, gzlast, encoding="binary");
+
+bzip.close(function(err, data) {
+  bzlast = data;
+});
+sys.puts("Last bit : "+bzlast.length);
+posix.writeSync(fd, bzlast, encoding="binary");
 posix.closeSync(fd);
 sys.puts("File closed");
 
 // See if we can uncompress it ok
+var source;
 var bunzip=new compress.Bunzip;
-bunzip.init();
 var testdata = posix.readFileSync("bzfiletest.js.bz2", encoding="binary");
 sys.puts("Test opened : "+testdata.length);
-var source = bunzip.inflate(testdata, "binary");
+bunzip.write(createBuffer(testdata, "binary"), function(err, data) {
+  source = data;
+});
+bunzip.close(function(err, data) {
+  source += data;
+});
 sys.puts(source.length);
 sys.puts(source);
-bunzip.end();
 
 
 
