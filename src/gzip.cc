@@ -117,8 +117,8 @@ class Gzip : public EventEmitter {
     t->Inherit(EventEmitter::constructor_template);
     t->InstanceTemplate()->SetInternalFieldCount(1);
 
-    NODE_SET_PROTOTYPE_METHOD(t, "write", GzipDeflate);
-    NODE_SET_PROTOTYPE_METHOD(t, "close", GzipEnd);
+    NODE_SET_PROTOTYPE_METHOD(t, "write", GzipWrite);
+    NODE_SET_PROTOTYPE_METHOD(t, "close", GzipClose);
     NODE_SET_PROTOTYPE_METHOD(t, "destroy", GzipDestroy);
 
     target->Set(String::NewSymbol("Gzip"), t->GetFunction());
@@ -142,7 +142,7 @@ class Gzip : public EventEmitter {
   }
 
 
-  int GzipDeflate(char *data, int data_len,
+  int GzipWrite(char *data, int data_len,
                   ScopedBytesBlob &out, int* out_len) {
     *out_len = 0;
     COND_RETURN(state_ != State::Data, Z_STREAM_ERROR);
@@ -180,7 +180,7 @@ class Gzip : public EventEmitter {
   }
 
 
-  int GzipEnd(ScopedBytesBlob &out, int *out_len) {
+  int GzipClose(ScopedBytesBlob &out, int *out_len) {
     *out_len = 0;
     COND_RETURN(state_ == State::Idle, Z_OK);
     assert(state_ == State::Data || state_ == State::Error);
@@ -251,7 +251,7 @@ class Gzip : public EventEmitter {
   }
 
   static Handle<Value>
-  GzipDeflate(const Arguments& args) {
+  GzipWrite(const Arguments& args) {
     Gzip *gzip = ObjectWrap::Unwrap<Gzip>(args.This());
 
     HandleScope scope;
@@ -273,14 +273,14 @@ class Gzip : public EventEmitter {
 
     ScopedBytesBlob out;
     int out_size;
-    int r = gzip->GzipDeflate(buffer->data(), buffer->length(), out, &out_size);
+    int r = gzip->GzipWrite(buffer->data(), buffer->length(), out, &out_size);
 
     DoCallback(cb, r, out, out_size);
     return Undefined();
   }
 
   static Handle<Value>
-  GzipEnd(const Arguments& args) {
+  GzipClose(const Arguments& args) {
     Gzip *gzip = ObjectWrap::Unwrap<Gzip>(args.This());
 
     HandleScope scope;
@@ -295,7 +295,7 @@ class Gzip : public EventEmitter {
     ScopedBytesBlob out;
     int out_size;
 
-    int r = gzip->GzipEnd(out, &out_size);
+    int r = gzip->GzipClose(out, &out_size);
     DoCallback(cb, r, out, out_size);
 
     return Undefined();
