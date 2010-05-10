@@ -14,6 +14,58 @@ using namespace node;
 
 typedef ScopedOutputBuffer<Bytef> ScopedBytesBlob;
 
+class GzipLib {
+ public:
+  static Handle<Value> ReturnOrThrow(HandleScope &scope,
+                                     const Local<Value> &value,
+                                     int gzipStatus) {
+    if (gzipStatus == Z_OK || gzipStatus == Z_STREAM_END) {
+      return scope.Close(value);
+    } else {
+      switch (gzipStatus) {
+        case Z_NEED_DICT: 
+          return ThrowException(Exception::Error(String::New(NeedDictionary)));
+        case Z_ERRNO: 
+          return ThrowException(Exception::Error(String::New(Errno)));
+        case Z_STREAM_ERROR: 
+          return ThrowException(Exception::Error(String::New(StreamError)));
+        case Z_DATA_ERROR: 
+          return ThrowException(Exception::Error(String::New(DataError)));
+        case Z_MEM_ERROR: 
+          return ThrowException(Exception::Error(String::New(MemError)));
+        case Z_BUF_ERROR: 
+          return ThrowException(Exception::Error(String::New(BufError)));
+        case Z_VERSION_ERROR: 
+          return ThrowException(Exception::Error(String::New(VersionError)));
+
+        default:
+          return ThrowException(Exception::Error(String::New("Unknown error")));
+      }
+    }
+  }
+
+ private:
+  static const char NeedDictionary[];
+  static const char Errno[];
+  static const char StreamError[];
+  static const char DataError[];
+  static const char MemError[];
+  static const char BufError[];
+  static const char VersionError[];
+};
+
+const char GzipLib::NeedDictionary[] = "Dictionary must be specified. "
+  "Currently this is unsupported by library.";
+const char GzipLib::Errno[] = "Z_ERRNO: Input/output error.";
+const char GzipLib::StreamError[] = "Z_STREAM_ERROR: Invalid arguments or "
+  "stream state is inconsistent.";
+const char GzipLib::DataError[] = "Z_DATA_ERROR: Input data corrupted.";
+const char GzipLib::MemError[] = "Z_MEM_ERROR: Out of memory.";
+const char GzipLib::BufError[] = "Z_BUF_ERROR: Buffer error.";
+const char GzipLib::VersionError[] = "Z_VERSION_ERROR: "
+  "Invalid library version.";
+
+
 class Gzip : public EventEmitter {
  public:
   static void
