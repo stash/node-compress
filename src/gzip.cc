@@ -83,6 +83,84 @@ class GzipLib {
   }
 
 
+  template <class Processor>
+  static Handle<Value> Write(const Arguments& args) {
+    Processor *proc = ObjectWrap::Unwrap<Processor>(args.This());
+
+    HandleScope scope;
+
+    if (!Buffer::HasInstance(args[0])) {
+      Local<Value> exception = Exception::TypeError(
+          String::New("Input must be of type Buffer"));
+      return ThrowException(exception);
+    }
+
+    Buffer *buffer = ObjectWrap::Unwrap<Buffer>(args[0]->ToObject());
+
+    Local<Value> cb(args[1]);
+    if (args.Length() > 1 && !args[1]->IsUndefined()) {
+      if (!args[1]->IsFunction()) {
+        return GzipLib::ThrowCallbackExpected();
+      }
+    }
+
+    typename Processor::Blob out;
+    int out_size;
+    int r = proc->Write(buffer->data(), buffer->length(), out, &out_size);
+
+    DoCallback(cb, r, out, out_size);
+    return Undefined();
+  }
+
+
+  template <class Processor>
+  static Handle<Value> Close(const Arguments& args) {
+    Processor *proc = ObjectWrap::Unwrap<Processor>(args.This());
+
+    HandleScope scope;
+
+    Local<Value> cb(args[0]);
+    if (args.Length() > 0 && !args[0]->IsUndefined()) {
+      if (!args[0]->IsFunction()) {
+        return GzipLib::ThrowCallbackExpected();
+      }
+    }  
+
+    typename Processor::Blob out;
+    int out_size;
+
+    int r = proc->Close(out, &out_size);
+    DoCallback(cb, r, out, out_size);
+
+    return Undefined();
+  }
+
+  template <class Processor>
+  static Handle<Value> Destroy(const Arguments& args) {
+    Processor *proc = ObjectWrap::Unwrap<Processor>(args.This());
+    proc->Destroy();
+
+    return Undefined();
+  }
+
+  static void DoCallback(Local<Value> &cb,
+      int r, ScopedBytesBlob &out, int out_size) {
+    if (cb->IsFunction()) {
+      Local<Value> argv[2];
+      argv[0] = GzipLib::GetException(r);
+      argv[1] = Encode(out.data(), out_size, BINARY);
+
+      TryCatch try_catch;
+
+      Function *fun = Function::Cast(*cb);
+      fun->Call(Context::GetCurrent()->Global(), 2, argv);
+
+      if (try_catch.HasCaught()) {
+        FatalException(try_catch);
+      }
+    }
+  }
+
  private:
   static const char NeedDictionary[];
   static const char Errno[];
@@ -106,6 +184,9 @@ const char GzipLib::VersionError[] = "Z_VERSION_ERROR: "
 
 
 class Gzip : public EventEmitter {
+  friend class GzipLib;
+  typedef ScopedBytesBlob Blob;
+
  public:
   static void
   Initialize (v8::Handle<v8::Object> target)
@@ -142,7 +223,7 @@ class Gzip : public EventEmitter {
   }
 
 
-  int GzipWrite(char *data, int data_len,
+  int Write(char *data, int data_len,
                   ScopedBytesBlob &out, int* out_len) {
     *out_len = 0;
     COND_RETURN(state_ != State::Data, Z_STREAM_ERROR);
@@ -180,7 +261,7 @@ class Gzip : public EventEmitter {
   }
 
 
-  int GzipClose(ScopedBytesBlob &out, int *out_len) {
+  int Close(ScopedBytesBlob &out, int *out_len) {
     *out_len = 0;
     COND_RETURN(state_ == State::Idle, Z_OK);
     assert(state_ == State::Data || state_ == State::Error);
@@ -192,12 +273,12 @@ class Gzip : public EventEmitter {
     }
 
     t.abort();
-    this->GzipDestroy();
+    this->Destroy();
     return ret;
   }
 
 
-  void GzipDestroy() {
+  void Destroy() {
     State::Transition t(state_, State::Idle);
     if (state_ != State::Idle) {
       deflateEnd(&stream_);
@@ -252,82 +333,20 @@ class Gzip : public EventEmitter {
 
   static Handle<Value>
   GzipWrite(const Arguments& args) {
-    Gzip *gzip = ObjectWrap::Unwrap<Gzip>(args.This());
-
-    HandleScope scope;
-
-    if (!Buffer::HasInstance(args[0])) {
-      Local<Value> exception = Exception::TypeError(
-          String::New("Input must be of type Buffer"));
-      return ThrowException(exception);
-    }
-
-    Buffer *buffer = ObjectWrap::Unwrap<Buffer>(args[0]->ToObject());
-
-    Local<Value> cb(args[1]);
-    if (args.Length() > 1 && !args[1]->IsUndefined()) {
-      if (!args[1]->IsFunction()) {
-        return GzipLib::ThrowCallbackExpected();
-      }
-    }
-
-    ScopedBytesBlob out;
-    int out_size;
-    int r = gzip->GzipWrite(buffer->data(), buffer->length(), out, &out_size);
-
-    DoCallback(cb, r, out, out_size);
-    return Undefined();
+    return GzipLib::Write<Gzip>(args);
   }
 
   static Handle<Value>
   GzipClose(const Arguments& args) {
-    Gzip *gzip = ObjectWrap::Unwrap<Gzip>(args.This());
-
-    HandleScope scope;
-
-    Local<Value> cb(args[0]);
-    if (args.Length() > 0 && !args[0]->IsUndefined()) {
-      if (!args[0]->IsFunction()) {
-        return GzipLib::ThrowCallbackExpected();
-      }
-    }  
-
-    ScopedBytesBlob out;
-    int out_size;
-
-    int r = gzip->GzipClose(out, &out_size);
-    DoCallback(cb, r, out, out_size);
-
-    return Undefined();
+    return GzipLib::Close<Gzip>(args);
   }
   
 
   static Handle<Value>
   GzipDestroy(const Arguments& args) {
-    Gzip *gzip = ObjectWrap::Unwrap<Gzip>(args.This());
-    gzip->GzipDestroy();
-
-    return Undefined();
+    return GzipLib::Destroy<Gzip>(args);
   }
 
-
-  static void
-  DoCallback(Local<Value> &cb, int r, ScopedBytesBlob &out, int out_size) {
-    if (cb->IsFunction()) {
-      Local<Value> argv[2];
-      argv[0] = GzipLib::GetException(r);
-      argv[1] = Encode(out.data(), out_size, BINARY);
-
-      TryCatch try_catch;
-
-      Function *fun = Function::Cast(*cb);
-      fun->Call(Context::GetCurrent()->Global(), 2, argv);
-
-      if (try_catch.HasCaught()) {
-        FatalException(try_catch);
-      }
-    }
-  }
 
   Gzip() 
     : EventEmitter(), state_(State::Idle)
