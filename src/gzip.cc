@@ -354,10 +354,7 @@ class Gzip : public EventEmitter {
 
   ~Gzip()
   {
-    if (state_ != State::Idle) {
-      // Release zlib structures.
-      deflateEnd(&stream_);
-    }
+    this->Destroy();
   }
 
  private:
@@ -368,6 +365,9 @@ class Gzip : public EventEmitter {
 
 
 class Gunzip : public EventEmitter {
+  friend class GzipLib;
+  typedef ScopedBytesBlob Blob;
+
  public:
   static void
   Initialize (v8::Handle<v8::Object> target)
@@ -379,9 +379,9 @@ class Gunzip : public EventEmitter {
     t->Inherit(EventEmitter::constructor_template);
     t->InstanceTemplate()->SetInternalFieldCount(1);
 
-    NODE_SET_PROTOTYPE_METHOD(t, "init", GunzipInit);
-    NODE_SET_PROTOTYPE_METHOD(t, "inflate", GunzipInflate);
-    NODE_SET_PROTOTYPE_METHOD(t, "end", GunzipEnd);
+    NODE_SET_PROTOTYPE_METHOD(t, "write", GunzipWrite);
+    NODE_SET_PROTOTYPE_METHOD(t, "close", GunzipClose);
+    NODE_SET_PROTOTYPE_METHOD(t, "destroy", GunzipDestroy);
 
     target->Set(String::NewSymbol("Gunzip"), t->GetFunction());
   }
@@ -405,7 +405,7 @@ class Gunzip : public EventEmitter {
   }
 
 
-  int GunzipInflate(const char* data, int data_len,
+  int Write(const char* data, int data_len,
                     ScopedBytesBlob &out, int* out_len) {
     *out_len = 0;
     COND_RETURN(state_ == State::Eos, Z_OK);
@@ -437,7 +437,7 @@ class Gunzip : public EventEmitter {
         case Z_DATA_ERROR:
         case Z_MEM_ERROR:
           t.abort();
-          GunzipEnd();
+          this->Destroy();
           return ret;
         }
         COND_RETURN(ret != Z_OK && ret != Z_STREAM_END, ret);
@@ -457,7 +457,13 @@ class Gunzip : public EventEmitter {
   }
 
 
-  void GunzipEnd() {
+  int Close(ScopedBytesBlob &out, int *out_len) {
+    *out_len = 0;
+    this->Destroy();
+    return Z_OK;
+  }
+
+  void Destroy() {
     if (state_ != State::Idle) {
       state_ = State::Idle;
       inflateEnd(&stream_);
@@ -473,56 +479,24 @@ class Gunzip : public EventEmitter {
     Gunzip *gunzip = new Gunzip();
     gunzip->Wrap(args.This());
 
-    return args.This();
-  }
-
-  static Handle<Value>
-  GunzipInit(const Arguments& args) {
-    Gunzip *gunzip = ObjectWrap::Unwrap<Gunzip>(args.This());
-
-    HandleScope scope;
-
     int r = gunzip->GunzipInit();
-
-    return scope.Close(Integer::New(r));
+    return GzipLib::ReturnThisOrThrow(args.This(), r);
   }
 
 
   static Handle<Value>
-  GunzipInflate(const Arguments& args) {
-    Gunzip *gunzip = ObjectWrap::Unwrap<Gunzip>(args.This());
-
-    HandleScope scope;
-
-    enum encoding enc = ParseEncoding(args[1]);
-    ssize_t len = DecodeBytes(args[0], enc);
-
-    if (len < 0) {
-      Local<Value> exception = Exception::TypeError(String::New("Bad argument"));
-      return ThrowException(exception);
-    }
-
-    ScopedArray<char> buf(len);
-    ssize_t written = DecodeWrite(buf.data(), len, args[0], BINARY);
-    assert(written == len);
-
-    ScopedBytesBlob out;
-    int out_size;
-    int r = gunzip->GunzipInflate(buf.data(), len, out, &out_size);
-
-    Local<Value> outString = Encode(out.data(), out_size, enc);
-    return scope.Close(outString);
+  GunzipWrite(const Arguments& args) {
+    return GzipLib::Write<Gunzip>(args);
   }
 
   static Handle<Value>
-  GunzipEnd(const Arguments& args) {
-    Gunzip *gunzip = ObjectWrap::Unwrap<Gunzip>(args.This());
+  GunzipClose(const Arguments& args) {
+    return GzipLib::Close<Gunzip>(args);
+  }
 
-    HandleScope scope;
-
-    gunzip->GunzipEnd();
-
-    return scope.Close(String::New(""));
+  static Handle<Value>
+  GunzipDestroy(const Arguments& args) {
+    return GzipLib::Destroy<Gunzip>(args);
   }
 
   Gunzip() 
@@ -531,7 +505,7 @@ class Gunzip : public EventEmitter {
 
   ~Gunzip()
   {
-    this->GunzipEnd();
+    this->Destroy();
   }
 
  private:
