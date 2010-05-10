@@ -1,4 +1,4 @@
-var compress=require("../compress-bindings");
+var compress=require("../compress");
 var sys=require("sys");
 var posix=require("fs");
 var Buffer = require('buffer').Buffer;

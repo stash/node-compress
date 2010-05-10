@@ -50,7 +50,10 @@ def shutdown():
   # better way to do this?
   if Options.commands['clean']:
     if exists('compress-bindings.node'): unlink('compress-bindings.node')
+    if exists('compress.js'): unlink('compress.js')
   else:
     if (exists('build/default/compress-bindings.node') and
         not exists('compress-bindings.node')):
       symlink('build/default/compress-bindings.node', 'compress-bindings.node')
+    if not exists('compress.js'):
+      symlink('lib/compress.js', 'compress.js')

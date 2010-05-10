@@ -1,4 +1,4 @@
-var compress=require("../compress-bindings");
+var compress=require("../compress");
 var sys=require("sys");
 var posix=require("fs");
 var Buffer = require('buffer').Buffer;
@@ -14,7 +14,7 @@ function createBuffer(str, enc) {
 
 // Read in our test file
 var data=posix.readFileSync("tests/filetest.js", encoding="binary");
-sys.puts("Got : "+data.length);
+sys.puts("Got: " + data.length);
 
 // Set output file
 var fd = posix.openSync("filetest.js.gz",
@@ -22,31 +22,31 @@ var fd = posix.openSync("filetest.js.gz",
 sys.puts("Openned file");
 
 // Create gzip stream
-var gzip=new compress.Gzip();
+var gzip = new compress.Gzip();
 
 // Pump data to be compressed
-var bzdata, bzlast;
+var gzdata, gzlast;
 gzip.write(createBuffer(data, "binary"), function(err, data) {
-  bzdata = data;
+  gzdata = data;
 });
-sys.puts("Compressed size : "+bzdata.length);
-posix.writeSync(fd, bzdata, encoding="binary");
+sys.puts("Compressed size: " + gzdata.length);
+posix.writeSync(fd, gzdata, encoding="binary");
 
 // Get the last bit
 
 gzip.close(function(err, data) {
-  bzlast = data;
+  gzlast = data;
 });
-sys.puts("Last bit : "+bzlast.length);
-posix.writeSync(fd, bzlast, encoding="binary");
+sys.puts("Last bit: " + gzlast.length);
+posix.writeSync(fd, gzlast, encoding="binary");
 posix.closeSync(fd);
 sys.puts("File closed");
 
 // See if we can uncompress it ok
 var source;
-var gunzip=new compress.Gunzip;
+var gunzip = new compress.Gunzip();
 var testdata = posix.readFileSync("filetest.js.gz", encoding="binary");
-sys.puts("Test opened : "+testdata.length);
+sys.puts("Test opened: " + testdata.length);
 gunzip.write(createBuffer(testdata, "binary"), function(err, data) {
   source = data;
 });
