@@ -49,7 +49,8 @@ def shutdown():
   # HACK to get compress.node out of build directory.
   # better way to do this?
   if Options.commands['clean']:
-    if exists('compress.node'): unlink('compress.node')
+    if exists('compress-bindings.node'): unlink('compress-bindings.node')
   else:
-    if exists('build/default/compress.node') and not exists('compress.node'):
-      symlink('build/default/compress.node', 'compress.node')
+    if (exists('build/default/compress-bindings.node') and
+        not exists('compress-bindings.node')):
+      symlink('build/default/compress-bindings.node', 'compress-bindings.node')
