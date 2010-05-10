@@ -1,5 +1,6 @@
 #include <node.h>
 #include <node_events.h>
+#include <node_buffer.h>
 #include <assert.h>
 #include <string.h>
 #include <stdlib.h>
@@ -16,33 +17,64 @@ typedef ScopedOutputBuffer<Bytef> ScopedBytesBlob;
 
 class GzipLib {
  public:
+  static Handle<Value> ReturnThisOrThrow(const Local<Object> &self,
+                                         int gzipStatus) {
+    if (!IsError(gzipStatus)) {
+      return self;
+    } else {
+      return ThrowError(gzipStatus);
+    }
+  }
+
+
   static Handle<Value> ReturnOrThrow(HandleScope &scope,
                                      const Local<Value> &value,
                                      int gzipStatus) {
-    if (gzipStatus == Z_OK || gzipStatus == Z_STREAM_END) {
+    if (!IsError(gzipStatus)) {
       return scope.Close(value);
+    } else {
+      return ThrowError(gzipStatus);
+    }
+  }
+
+
+  static bool IsError(int gzipStatus) {
+    return !(gzipStatus == Z_OK || gzipStatus == Z_STREAM_END);
+  }
+
+
+  static Handle<Value> ThrowError(int gzipStatus) {
+    assert(IsError(gzipStatus));
+
+    return ThrowException(GetException(gzipStatus));
+  }
+
+  static Local<Value> GetException(int gzipStatus) {
+    if (!IsError(gzipStatus)) {
+      return Local<Value>::New(Undefined());
     } else {
       switch (gzipStatus) {
         case Z_NEED_DICT: 
-          return ThrowException(Exception::Error(String::New(NeedDictionary)));
+          return Exception::Error(String::New(NeedDictionary));
         case Z_ERRNO: 
-          return ThrowException(Exception::Error(String::New(Errno)));
+          return Exception::Error(String::New(Errno));
         case Z_STREAM_ERROR: 
-          return ThrowException(Exception::Error(String::New(StreamError)));
+          return Exception::Error(String::New(StreamError));
         case Z_DATA_ERROR: 
-          return ThrowException(Exception::Error(String::New(DataError)));
+          return Exception::Error(String::New(DataError));
         case Z_MEM_ERROR: 
-          return ThrowException(Exception::Error(String::New(MemError)));
+          return Exception::Error(String::New(MemError));
         case Z_BUF_ERROR: 
-          return ThrowException(Exception::Error(String::New(BufError)));
+          return Exception::Error(String::New(BufError));
         case Z_VERSION_ERROR: 
-          return ThrowException(Exception::Error(String::New(VersionError)));
+          return Exception::Error(String::New(VersionError));
 
         default:
-          return ThrowException(Exception::Error(String::New("Unknown error")));
+          return Exception::Error(String::New("Unknown error"));
       }
     }
   }
+
 
  private:
   static const char NeedDictionary[];
@@ -78,8 +110,7 @@ class Gzip : public EventEmitter {
     t->Inherit(EventEmitter::constructor_template);
     t->InstanceTemplate()->SetInternalFieldCount(1);
 
-    NODE_SET_PROTOTYPE_METHOD(t, "init", GzipInit);
-    NODE_SET_PROTOTYPE_METHOD(t, "deflate", GzipDeflate);
+    NODE_SET_PROTOTYPE_METHOD(t, "write", GzipDeflate);
     NODE_SET_PROTOTYPE_METHOD(t, "end", GzipEnd);
 
     target->Set(String::NewSymbol("Gzip"), t->GetFunction());
@@ -103,7 +134,7 @@ class Gzip : public EventEmitter {
   }
 
 
-  int GzipDeflate(char* data, int data_len,
+  int GzipDeflate(char *data, int data_len,
                   ScopedBytesBlob &out, int* out_len) {
     *out_len = 0;
     COND_RETURN(state_ != State::Data, Z_STREAM_ERROR);
@@ -111,7 +142,7 @@ class Gzip : public EventEmitter {
     State::Transition t(state_, State::Error);
 
     int ret = Z_OK;
-    while (data_len > 0) {    
+    while (data_len > 0) { 
       if (data_len > CHUNK) {
         stream_.avail_in = CHUNK;
       } else {
@@ -185,18 +216,6 @@ class Gzip : public EventEmitter {
   {
     HandleScope scope;
 
-    Gzip *gzip = new Gzip();
-    gzip->Wrap(args.This());
-
-    return args.This();
-  }
-
-  static Handle<Value>
-  GzipInit (const Arguments& args)
-  {
-    Gzip *gzip = ObjectWrap::Unwrap<Gzip>(args.This());
-
-    HandleScope scope;
     int level = Z_DEFAULT_COMPRESSION;
     if (args.Length() > 0 && !args[0]->IsUndefined()) {
       if (!args[0]->IsInt32()) {
@@ -207,8 +226,11 @@ class Gzip : public EventEmitter {
       level = args[0]->Int32Value();
     }
 
+    Gzip *gzip = new Gzip();
+    gzip->Wrap(args.This());
+
     int r = gzip->GzipInit(level);
-    return scope.Close(Integer::New(r));
+    return GzipLib::ReturnThisOrThrow(args.This(), r);
   }
 
   static Handle<Value>
@@ -217,27 +239,45 @@ class Gzip : public EventEmitter {
 
     HandleScope scope;
 
-    enum encoding enc = ParseEncoding(args[1]);
-    ssize_t len = DecodeBytes(args[0], enc);
-
-    if (len < 0) {
-      Local<Value> exception = Exception::TypeError(String::New("Bad argument"));
+    if (!Buffer::HasInstance(args[0])) {
+      Local<Value> exception = Exception::TypeError(
+          String::New("Input must be of type Buffer"));
       return ThrowException(exception);
     }
-    ScopedArray<char> buf(len);
-    ssize_t written = DecodeWrite(buf.data(), len, args[0], enc);
-    assert(written == len);
+
+    Buffer *buffer = ObjectWrap::Unwrap<Buffer>(args[0]->ToObject());
+
+    Local<Value> cb(Local<Value>::New(Undefined()));
+    if (args.Length() > 1 && !args[1]->IsUndefined()) {
+      if (!args[1]->IsFunction()) {
+        Local<Value> exception = Exception::TypeError(
+            String::New("Callback must be a function"));
+        return ThrowException(exception);
+      }
+      cb = args[1];
+    }
 
     ScopedBytesBlob out;
     int out_size;
-    int r = gzip->GzipDeflate(buf.data(), len, out, &out_size);
-
-    if (out_size == 0) {
-      return scope.Close(String::New(""));
-    }
+    int r = gzip->GzipDeflate(buffer->data(), buffer->length(), out, &out_size);
 
     Local<Value> outString = Encode(out.data(), out_size, BINARY);
-    return scope.Close(outString);
+    if (cb->IsFunction()) {
+      Function *fun = Function::Cast(*cb);
+
+      Local<Value> argv[2];
+      argv[0] = GzipLib::GetException(r);
+      argv[1] = outString;
+
+      TryCatch try_catch;
+
+      fun->Call(Context::GetCurrent()->Global(), 2, argv);
+
+      if (try_catch.HasCaught()) {
+        FatalException(try_catch);
+      }
+    }
+    return Undefined();
   }
 
   static Handle<Value>
