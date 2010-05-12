@@ -52,38 +52,26 @@ class ZipLib {
   typedef typename Processor::Blob Blob;
 
  public:
-  static Handle<Value> ReturnThisOrThrow(const Arguments &args,
-                                         int zipStatus) {
-    if (!Utils::IsError(zipStatus)) {
-      return args.This();
-    } else {
-      return ThrowError(zipStatus);
-    }
+  static void Initialize(v8::Handle<v8::Object> target)
+  {
+    HandleScope scope;
+
+    Local<FunctionTemplate> t = FunctionTemplate::New(New);
+
+    t->Inherit(EventEmitter::constructor_template);
+    t->InstanceTemplate()->SetInternalFieldCount(1);
+
+    NODE_SET_PROTOTYPE_METHOD(t, "write", Write);
+    NODE_SET_PROTOTYPE_METHOD(t, "close", Close);
+    NODE_SET_PROTOTYPE_METHOD(t, "destroy", Destroy);
+
+    target->Set(String::NewSymbol(Processor::Name), t->GetFunction());
   }
 
 
-  static Handle<Value> ReturnOrThrow(HandleScope &scope,
-                                     const Local<Value> &value,
-                                     int zipStatus) {
-    if (!Utils::IsError(zipStatus)) {
-      return scope.Close(value);
-    } else {
-      return ThrowError(zipStatus);
-    }
-  }
-
-
-  static Handle<Value> ThrowError(int zipStatus) {
-    assert(Utils::IsError(zipStatus));
-
-    return ThrowException(Utils::GetException(zipStatus));
-  }
-
-  
-  static Handle<Value> ThrowCallbackExpected() {
-    Local<Value> exception = Exception::TypeError(
-        String::New("Callback must be a function"));
-    return ThrowException(exception);
+ public:
+  static Handle<Value> New(const Arguments &args) {
+    return Processor::New(args);
   }
 
 
@@ -143,6 +131,42 @@ class ZipLib {
     proc->Destroy();
 
     return Undefined();
+  }
+
+
+ public:
+  static Handle<Value> ReturnThisOrThrow(const Arguments &args,
+                                         int zipStatus) {
+    if (!Utils::IsError(zipStatus)) {
+      return args.This();
+    } else {
+      return ThrowError(zipStatus);
+    }
+  }
+
+
+  static Handle<Value> ReturnOrThrow(HandleScope &scope,
+                                     const Local<Value> &value,
+                                     int zipStatus) {
+    if (!Utils::IsError(zipStatus)) {
+      return scope.Close(value);
+    } else {
+      return ThrowError(zipStatus);
+    }
+  }
+
+
+  static Handle<Value> ThrowError(int zipStatus) {
+    assert(Utils::IsError(zipStatus));
+
+    return ThrowException(Utils::GetException(zipStatus));
+  }
+
+  
+  static Handle<Value> ThrowCallbackExpected() {
+    Local<Value> exception = Exception::TypeError(
+        String::New("Callback must be a function"));
+    return ThrowException(exception);
   }
 
 

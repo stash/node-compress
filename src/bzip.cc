@@ -83,30 +83,15 @@ const char BzipUtils::UnexpectedEof[] = "Unexpected end of file.";
 const char BzipUtils::OutbuffFull[] = "Output buffer full.";
 
 
-class Bzip : public EventEmitter {
-  friend class ZipLib<Bzip>;
+class BzipImpl : public EventEmitter {
+  friend class ZipLib<BzipImpl>;
   typedef BzipUtils Utils;
   typedef BzipUtils::Blob Blob;
 
-  typedef ZipLib<Bzip> BzipLib;
+  typedef ZipLib<BzipImpl> BzipLib;
 
  public:
-  static void Initialize(v8::Handle<v8::Object> target)
-  {
-    HandleScope scope;
-
-    Local<FunctionTemplate> t = FunctionTemplate::New(New);
-
-    t->Inherit(EventEmitter::constructor_template);
-    t->InstanceTemplate()->SetInternalFieldCount(1);
-
-    NODE_SET_PROTOTYPE_METHOD(t, "write", BzipWrite);
-    NODE_SET_PROTOTYPE_METHOD(t, "close", BzipClose);
-    NODE_SET_PROTOTYPE_METHOD(t, "destroy", BzipDestroy);
-
-    target->Set(String::NewSymbol("Bzip"), t->GetFunction());
-  }
-
+  static const char Name[];
 
  private:
   int BzipInit(int blockSize100k, int workFactor) {
@@ -206,7 +191,7 @@ class Bzip : public EventEmitter {
   {
     HandleScope scope;
 
-    Bzip *bzip = new Bzip();
+    BzipImpl *bzip = new BzipImpl();
     bzip->Wrap(args.This());
 
     int blockSize100k = 1;
@@ -234,27 +219,12 @@ class Bzip : public EventEmitter {
   }
 
 
-  static Handle<Value> BzipWrite(const Arguments &args) {
-    return BzipLib::Write(args);
-  }
-
-
-  static Handle<Value> BzipClose(const Arguments &args) {
-    return BzipLib::Close(args);
-  }
-
-
-  static Handle<Value> BzipDestroy(const Arguments &args) {
-    return BzipLib::Destroy(args);
-  }
-
-
-  Bzip()
+  BzipImpl()
     : EventEmitter(), state_(BzipLib::Idle)
   {}
 
 
-  ~Bzip()
+  ~BzipImpl()
   {
     this->Destroy();
   }
@@ -265,32 +235,21 @@ class Bzip : public EventEmitter {
   BzipLib::State state_;
 
 };
+const char BzipImpl::Name[] = "Bzip";
+typedef ZipLib<BzipImpl> Bzip;
 
 
-class Bunzip : public EventEmitter {
-  friend class ZipLib<Bunzip>;
+class BunzipImpl : public EventEmitter {
+  friend class ZipLib<BunzipImpl>;
   typedef BzipUtils Utils;
   typedef BzipUtils::Blob Blob;
 
-  typedef ZipLib<Bunzip> BzipLib;
+  typedef ZipLib<BunzipImpl> BzipLib;
 
  public:
-  static void Initialize (v8::Handle<v8::Object> target)
-  {
-    HandleScope scope;
+  static const char Name[];
 
-    Local<FunctionTemplate> t = FunctionTemplate::New(New);
-
-    t->Inherit(EventEmitter::constructor_template);
-    t->InstanceTemplate()->SetInternalFieldCount(1);
-
-    NODE_SET_PROTOTYPE_METHOD(t, "write", BunzipWrite);
-    NODE_SET_PROTOTYPE_METHOD(t, "close", BunzipClose);
-    NODE_SET_PROTOTYPE_METHOD(t, "destroy", BunzipDestroy);
-
-    target->Set(String::NewSymbol("Bunzip"), t->GetFunction());
-  }
-
+ public:
   int BunzipInit(int small) {
     COND_RETURN(state_ != BzipLib::Idle, BZ_SEQUENCE_ERROR);
 
@@ -360,7 +319,7 @@ class Bunzip : public EventEmitter {
   static Handle<Value> New(const Arguments& args) {
     HandleScope scope;
 
-    Bunzip *bunzip = new Bunzip();
+    BunzipImpl *bunzip = new BunzipImpl();
     bunzip->Wrap(args.This());
 
     int small = 0;
@@ -373,27 +332,12 @@ class Bunzip : public EventEmitter {
   }
 
 
-  static Handle<Value> BunzipWrite(const Arguments& args) {
-    return BzipLib::Write(args);
-  }
-
-
-  static Handle<Value> BunzipClose(const Arguments& args) {
-    return BzipLib::Close(args);
-  }
-
-
-  static Handle<Value> BunzipDestroy(const Arguments& args) {
-    return BzipLib::Destroy(args);
-  }
-
-
-  Bunzip()
+  BunzipImpl()
     : EventEmitter(), state_(BzipLib::Idle)
   {}
 
 
-  ~Bunzip ()
+  ~BunzipImpl()
   {
     this->Destroy();
   }
@@ -404,4 +348,5 @@ class Bunzip : public EventEmitter {
   BzipLib::State state_;
 
 };
-
+const char BunzipImpl::Name[] = "Bunzip";
+typedef ZipLib<BunzipImpl> Bunzip;

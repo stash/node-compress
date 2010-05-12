@@ -72,31 +72,17 @@ const char GzipUtils::VersionError[] = "Z_VERSION_ERROR: "
   "Invalid library version.";
 
 
-class Gzip : public EventEmitter {
-  friend class ZipLib<Gzip>;
+class GzipImpl : public EventEmitter {
+  friend class ZipLib<GzipImpl>;
   typedef GzipUtils Utils;
   typedef GzipUtils::Blob Blob;
 
-  typedef ZipLib<Gzip> GzipLib;
+  typedef ZipLib<GzipImpl> GzipLib;
 
  public:
-  static void Initialize(v8::Handle<v8::Object> target)
-  {
-    HandleScope scope;
+  static const char Name[];
 
-    Local<FunctionTemplate> t = FunctionTemplate::New(New);
-
-    t->Inherit(EventEmitter::constructor_template);
-    t->InstanceTemplate()->SetInternalFieldCount(1);
-
-    NODE_SET_PROTOTYPE_METHOD(t, "write", GzipWrite);
-    NODE_SET_PROTOTYPE_METHOD(t, "close", GzipClose);
-    NODE_SET_PROTOTYPE_METHOD(t, "destroy", GzipDestroy);
-
-    target->Set(String::NewSymbol("Gzip"), t->GetFunction());
-  }
-
- private:
+ public:
   int GzipInit(int level) {
     COND_RETURN(state_ != GzipLib::Idle, Z_STREAM_ERROR);
 
@@ -197,7 +183,7 @@ class Gzip : public EventEmitter {
   }
 
 
- protected:
+ public:
   static Handle<Value> New(const Arguments& args)
   {
     HandleScope scope;
@@ -212,33 +198,20 @@ class Gzip : public EventEmitter {
       level = args[0]->Int32Value();
     }
 
-    Gzip *gzip = new Gzip();
+    GzipImpl *gzip = new GzipImpl();
     gzip->Wrap(args.This());
 
     int r = gzip->GzipInit(level);
     return GzipLib::ReturnThisOrThrow(args, r);
   }
 
-  static Handle<Value> GzipWrite(const Arguments& args) {
-    return GzipLib::Write(args);
-  }
-
-  static Handle<Value> GzipClose(const Arguments& args) {
-    return GzipLib::Close(args);
-  }
-  
-
-  static Handle<Value> GzipDestroy(const Arguments& args) {
-    return GzipLib::Destroy(args);
-  }
-
-
-  Gzip() 
+ protected:
+  GzipImpl() 
     : EventEmitter(), state_(GzipLib::Idle)
   {}
 
 
-  ~Gzip()
+  ~GzipImpl()
   {
     this->Destroy();
   }
@@ -248,30 +221,18 @@ class Gzip : public EventEmitter {
   GzipLib::State state_;
 
 };
+const char GzipImpl::Name[] = "Gzip";
+typedef ZipLib<GzipImpl> Gzip;
 
 
-class Gunzip : public EventEmitter {
-  friend class ZipLib<Gunzip>;
+class GunzipImpl : public EventEmitter {
+  friend class ZipLib<GunzipImpl>;
   typedef GzipUtils Utils;
   typedef GzipUtils::Blob Blob;
-  typedef ZipLib<Gunzip> GzipLib;
 
+  typedef ZipLib<GunzipImpl> GzipLib;
  public:
-  static void Initialize(v8::Handle<v8::Object> target)
-  {
-    HandleScope scope;
-
-    Local<FunctionTemplate> t = FunctionTemplate::New(New);
-
-    t->Inherit(EventEmitter::constructor_template);
-    t->InstanceTemplate()->SetInternalFieldCount(1);
-
-    NODE_SET_PROTOTYPE_METHOD(t, "write", GunzipWrite);
-    NODE_SET_PROTOTYPE_METHOD(t, "close", GunzipClose);
-    NODE_SET_PROTOTYPE_METHOD(t, "destroy", GunzipDestroy);
-
-    target->Set(String::NewSymbol("Gunzip"), t->GetFunction());
-  }
+  static const char Name[];
 
  private:
   int GunzipInit() {
@@ -357,11 +318,11 @@ class Gunzip : public EventEmitter {
     }
   }
 
- protected:
+ public:
   static Handle<Value> New(const Arguments& args) {
     HandleScope scope;
 
-    Gunzip *gunzip = new Gunzip();
+    GunzipImpl *gunzip = new GunzipImpl();
     gunzip->Wrap(args.This());
 
     int r = gunzip->GunzipInit();
@@ -369,27 +330,13 @@ class Gunzip : public EventEmitter {
   }
 
 
-  static Handle<Value> GunzipWrite(const Arguments& args) {
-    return GzipLib::Write(args);
-  }
-
-
-  static Handle<Value> GunzipClose(const Arguments& args) {
-    return GzipLib::Close(args);
-  }
-
-
-  static Handle<Value> GunzipDestroy(const Arguments& args) {
-    return GzipLib::Destroy(args);
-  }
-
-
-  Gunzip() 
+ protected:
+  GunzipImpl() 
     : EventEmitter(), state_(GzipLib::Idle)
   {}
 
 
-  ~Gunzip()
+  ~GunzipImpl()
   {
     this->Destroy();
   }
@@ -398,4 +345,6 @@ class Gunzip : public EventEmitter {
   z_stream stream_;
   GzipLib::State state_;
 };
+const char GunzipImpl::Name[] = "Gunzip";
+typedef ZipLib<GunzipImpl> Gunzip;
 
