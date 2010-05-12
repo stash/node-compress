@@ -110,7 +110,7 @@ class Bzip : public EventEmitter {
 
  private:
   int BzipInit(int blockSize100k, int workFactor) {
-    COND_RETURN(state_ != State::Idle, BZ_SEQUENCE_ERROR);
+    COND_RETURN(state_ != BzipLib::Idle, BZ_SEQUENCE_ERROR);
 
     /* allocate deflate state */
     stream_.bzalloc = NULL;
@@ -119,7 +119,7 @@ class Bzip : public EventEmitter {
 
     int ret = BZ2_bzCompressInit(&stream_, blockSize100k, 0, workFactor);
     if (ret == BZ_OK) {
-      state_ = State::Data;
+      state_ = BzipLib::Data;
     }
     return ret;
   }
@@ -127,9 +127,9 @@ class Bzip : public EventEmitter {
 
   int Write(char *data, int data_len, Blob &out, int *out_len) {
     *out_len = 0;
-    COND_RETURN(state_ != State::Data, BZ_SEQUENCE_ERROR);
+    COND_RETURN(state_ != BzipLib::Data, BZ_SEQUENCE_ERROR);
 
-    State::Transition t(state_, State::Error);
+    BzipLib::Transition t(state_, BzipLib::Error);
 
     int ret = BZ_OK;
     while (data_len > 0) {    
@@ -148,20 +148,20 @@ class Bzip : public EventEmitter {
       data += data_len - stream_.avail_in;
       data_len = stream_.avail_in;
     }
-    t.alter(State::Data);
+    t.alter(BzipLib::Data);
     return BZ_OK;
   }
 
 
   int Close(Blob &out, int *out_len) {
     *out_len = 0;
-    COND_RETURN(state_ == State::Idle, BZ_OK);
-    assert(state_ == State::Data || state_ == State::Error);
+    COND_RETURN(state_ == BzipLib::Idle, BZ_OK);
+    assert(state_ == BzipLib::Data || state_ == BzipLib::Error);
 
-    State::Transition t(state_, State::Error);
+    BzipLib::Transition t(state_, BzipLib::Error);
 
     int ret = BZ_OK;
-    if (state_ == State::Data) {
+    if (state_ == BzipLib::Data) {
       ret = BzipEndWithData(out, out_len);
     }
 
@@ -172,8 +172,8 @@ class Bzip : public EventEmitter {
 
 
   void Destroy() {
-    if (state_ != State::Idle) {
-      state_ = State::Idle;
+    if (state_ != BzipLib::Idle) {
+      state_ = BzipLib::Idle;
       BZ2_bzCompressEnd(&stream_);
     }
   }
@@ -250,7 +250,7 @@ class Bzip : public EventEmitter {
 
 
   Bzip()
-    : EventEmitter(), state_(State::Idle)
+    : EventEmitter(), state_(BzipLib::Idle)
   {}
 
 
@@ -262,7 +262,7 @@ class Bzip : public EventEmitter {
 
  private:
   bz_stream stream_;
-  State::Value state_;
+  BzipLib::State state_;
 
 };
 
@@ -292,7 +292,7 @@ class Bunzip : public EventEmitter {
   }
 
   int BunzipInit(int small) {
-    COND_RETURN(state_ != State::Idle, BZ_SEQUENCE_ERROR);
+    COND_RETURN(state_ != BzipLib::Idle, BZ_SEQUENCE_ERROR);
 
     /* allocate inflate state */
     stream_.bzalloc = NULL;
@@ -303,7 +303,7 @@ class Bunzip : public EventEmitter {
 
     int ret = BZ2_bzDecompressInit(&stream_, 0, small);
     if (ret == BZ_OK) {
-      state_ = State::Data;
+      state_ = BzipLib::Data;
     }
     return ret;
   }
@@ -311,12 +311,12 @@ class Bunzip : public EventEmitter {
 
   int Write(const char *data, int data_len, Blob &out, int *out_len) {
     *out_len = 0;
-    COND_RETURN(state_ == State::Eos, BZ_OK);
-    COND_RETURN(state_ != State::Data, BZ_SEQUENCE_ERROR);
+    COND_RETURN(state_ == BzipLib::Eos, BZ_OK);
+    COND_RETURN(state_ != BzipLib::Data, BZ_SEQUENCE_ERROR);
 
     int ret = BZ_OK;
 
-    State::Transition t(state_, State::Error);
+    BzipLib::Transition t(state_, BzipLib::Error);
     while (data_len > 0) { 
       COND_RETURN(!out.GrowBy(data_len), BZ_MEM_ERROR);
 
@@ -334,11 +334,11 @@ class Bunzip : public EventEmitter {
       data_len = stream_.avail_in;
 
       if (ret == BZ_STREAM_END) {
-        t.alter(State::Eos);
+        t.alter(BzipLib::Eos);
         return ret;
       }
     }
-    t.alter(State::Data);
+    t.alter(BzipLib::Data);
     return ret;
   }
 
@@ -350,8 +350,8 @@ class Bunzip : public EventEmitter {
 
 
   void Destroy() {
-    if (state_ != State::Idle) {
-      state_ = State::Idle;
+    if (state_ != BzipLib::Idle) {
+      state_ = BzipLib::Idle;
       BZ2_bzDecompressEnd(&stream_);
     }
   }
@@ -389,7 +389,7 @@ class Bunzip : public EventEmitter {
 
 
   Bunzip()
-    : EventEmitter(), state_(State::Idle)
+    : EventEmitter(), state_(BzipLib::Idle)
   {}
 
 
@@ -401,7 +401,7 @@ class Bunzip : public EventEmitter {
 
  private:
   bz_stream stream_;
-  State::Value state_;
+  BzipLib::State state_;
 
 };
 

@@ -98,7 +98,7 @@ class Gzip : public EventEmitter {
 
  private:
   int GzipInit(int level) {
-    COND_RETURN(state_ != State::Idle, Z_STREAM_ERROR);
+    COND_RETURN(state_ != GzipLib::Idle, Z_STREAM_ERROR);
 
     /* allocate deflate state */
     stream_.zalloc = Z_NULL;
@@ -108,7 +108,7 @@ class Gzip : public EventEmitter {
     int ret = deflateInit2(&stream_, level,
                            Z_DEFLATED, 16 + MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
     if (ret == Z_OK) {
-      state_ = State::Data;
+      state_ = GzipLib::Data;
     }
     return ret;
   }
@@ -116,9 +116,9 @@ class Gzip : public EventEmitter {
 
   int Write(char *data, int data_len, Blob &out, int *out_len) {
     *out_len = 0;
-    COND_RETURN(state_ != State::Data, Z_STREAM_ERROR);
+    COND_RETURN(state_ != GzipLib::Data, Z_STREAM_ERROR);
 
-    State::Transition t(state_, State::Error);
+    GzipLib::Transition t(state_, GzipLib::Error);
 
     int ret = Z_OK;
     while (data_len > 0) { 
@@ -146,19 +146,19 @@ class Gzip : public EventEmitter {
       data_len -= CHUNK;
     }
 
-    t.alter(State::Data);
+    t.alter(GzipLib::Data);
     return ret;
   }
 
 
   int Close(Blob &out, int *out_len) {
     *out_len = 0;
-    COND_RETURN(state_ == State::Idle, Z_OK);
-    assert(state_ == State::Data || state_ == State::Error);
+    COND_RETURN(state_ == GzipLib::Idle, Z_OK);
+    assert(state_ == GzipLib::Data || state_ == GzipLib::Error);
 
-    State::Transition t(state_, State::Error);
+    GzipLib::Transition t(state_, GzipLib::Error);
     int ret = Z_OK;
-    if (state_ == State::Data) {
+    if (state_ == GzipLib::Data) {
       ret = GzipEndWithData(out, out_len);
     }
 
@@ -169,8 +169,8 @@ class Gzip : public EventEmitter {
 
 
   void Destroy() {
-    State::Transition t(state_, State::Idle);
-    if (state_ != State::Idle) {
+    GzipLib::Transition t(state_, GzipLib::Idle);
+    if (state_ != GzipLib::Idle) {
       deflateEnd(&stream_);
     }
   }
@@ -234,7 +234,7 @@ class Gzip : public EventEmitter {
 
 
   Gzip() 
-    : EventEmitter(), state_(State::Idle)
+    : EventEmitter(), state_(GzipLib::Idle)
   {}
 
 
@@ -245,7 +245,7 @@ class Gzip : public EventEmitter {
 
  private:
   z_stream stream_;
-  State::Value state_;
+  GzipLib::State state_;
 
 };
 
@@ -275,7 +275,7 @@ class Gunzip : public EventEmitter {
 
  private:
   int GunzipInit() {
-    COND_RETURN(state_ != State::Idle, Z_STREAM_ERROR);
+    COND_RETURN(state_ != GzipLib::Idle, Z_STREAM_ERROR);
 
     /* allocate inflate state */
     stream_.zalloc = Z_NULL;
@@ -286,7 +286,7 @@ class Gunzip : public EventEmitter {
 
     int ret = inflateInit2(&stream_, 16 + MAX_WBITS);
     if (ret == Z_OK) {
-      state_ = State::Data;
+      state_ = GzipLib::Data;
     }
     return ret;
   }
@@ -294,10 +294,10 @@ class Gunzip : public EventEmitter {
 
   int Write(const char* data, int data_len, Blob &out, int *out_len) {
     *out_len = 0;
-    COND_RETURN(state_ == State::Eos, Z_OK);
-    COND_RETURN(state_ != State::Data, Z_STREAM_ERROR);
+    COND_RETURN(state_ == GzipLib::Eos, Z_OK);
+    COND_RETURN(state_ != GzipLib::Data, Z_STREAM_ERROR);
 
-    State::Transition t(state_, State::Error);
+    GzipLib::Transition t(state_, GzipLib::Error);
 
     int ret = Z_OK;
     while (data_len > 0) { 
@@ -331,14 +331,14 @@ class Gunzip : public EventEmitter {
         *out_len += (CHUNK - stream_.avail_out);
 
         if (ret == Z_STREAM_END) {
-          t.alter(State::Eos);
+          t.alter(GzipLib::Eos);
           return ret;
         }
       } while (stream_.avail_out == 0);
       data += CHUNK;
       data_len -= CHUNK;
     }
-    t.alter(State::Data);
+    t.alter(GzipLib::Data);
     return ret;
   }
 
@@ -351,8 +351,8 @@ class Gunzip : public EventEmitter {
 
 
   void Destroy() {
-    if (state_ != State::Idle) {
-      state_ = State::Idle;
+    if (state_ != GzipLib::Idle) {
+      state_ = GzipLib::Idle;
       inflateEnd(&stream_);
     }
   }
@@ -385,7 +385,7 @@ class Gunzip : public EventEmitter {
 
 
   Gunzip() 
-    : EventEmitter(), state_(State::Idle)
+    : EventEmitter(), state_(GzipLib::Idle)
   {}
 
 
@@ -396,6 +396,6 @@ class Gunzip : public EventEmitter {
 
  private:
   z_stream stream_;
-  State::Value state_;
+  GzipLib::State state_;
 };
 

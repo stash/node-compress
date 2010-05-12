@@ -6,8 +6,44 @@
 #include <node_buffer.h>
 #include <assert.h>
 
+#include "utils.h"
+
 using namespace v8;
 using namespace node;
+
+template <class T>
+class StateTransition {
+ public:
+  StateTransition(T &ref, T value)
+    : reference_(ref), value_(value), abort_(false)
+  {}
+
+  ~StateTransition() {
+    if (!abort_) {
+      reference_ = value_;
+    }
+  }
+
+  void alter(T value) {
+    value_ = value;
+  }
+
+  void abort(bool value = true) {
+    abort_ = value;
+  }
+
+ private:
+  T &reference_;
+  T value_;
+  bool abort_;
+
+ private:
+  StateTransition(StateTransition&);
+  StateTransition(const StateTransition&);
+  StateTransition& operator=(StateTransition&);
+  StateTransition& operator=(const StateTransition&);
+};
+
 
 template <class Processor>
 class ZipLib {
@@ -126,6 +162,15 @@ class ZipLib {
       }
     }
   }
+
+  enum State {
+    Idle,
+    Data,
+    Eos,
+    Error
+  };
+
+  typedef StateTransition<State> Transition;
 
 };
 
