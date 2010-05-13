@@ -97,9 +97,9 @@ class ZipLib {
 
     Blob out;
     int out_size;
-    int r = proc->Write(buffer->data(), buffer->length(), out, &out_size);
+    int r = proc->Write(buffer->data(), buffer->length(), out);
 
-    DoCallback(cb, r, out, out_size);
+    DoCallback(cb, r, out);
     return Undefined();
   }
 
@@ -119,8 +119,8 @@ class ZipLib {
     Blob out;
     int out_size;
 
-    int r = proc->Close(out, &out_size);
-    DoCallback(cb, r, out, out_size);
+    int r = proc->Close(out);
+    DoCallback(cb, r, out);
 
     return Undefined();
   }
@@ -170,11 +170,11 @@ class ZipLib {
   }
 
 
-  static void DoCallback(Local<Value> &cb, int r, Blob &out, int out_size) {
+  static void DoCallback(Local<Value> &cb, int r, Blob &out) {
     if (cb->IsFunction()) {
       Local<Value> argv[2];
       argv[0] = Utils::GetException(r);
-      argv[1] = Encode(out.data(), out_size, BINARY);
+      argv[1] = Encode(out.data(), out.length(), BINARY);
 
       TryCatch try_catch;
 

@@ -110,8 +110,7 @@ class BzipImpl : public EventEmitter {
   }
 
 
-  int Write(char *data, int data_len, Blob &out, int *out_len) {
-    *out_len = 0;
+  int Write(char *data, int data_len, Blob &out) {
     COND_RETURN(state_ != BzipLib::Data, BZ_SEQUENCE_ERROR);
 
     BzipLib::Transition t(state_, BzipLib::Error);
@@ -121,7 +120,7 @@ class BzipImpl : public EventEmitter {
       COND_RETURN(!out.GrowBy(data_len + 1), BZ_MEM_ERROR);
       
       stream_.next_in = data;
-      stream_.next_out = out.data() + *out_len;
+      stream_.next_out = out.data() + out.length();
       stream_.avail_in = data_len;
       stream_.avail_out = data_len + 1;
 
@@ -129,7 +128,7 @@ class BzipImpl : public EventEmitter {
       assert(ret != BZ_SEQUENCE_ERROR);  /* state not clobbered */
       COND_RETURN(ret != BZ_RUN_OK, ret);
 
-      *out_len += (data_len + 1 - stream_.avail_out);
+      out.IncreaseLengthBy(data_len + 1 - stream_.avail_out);
       data += data_len - stream_.avail_in;
       data_len = stream_.avail_in;
     }
@@ -138,8 +137,7 @@ class BzipImpl : public EventEmitter {
   }
 
 
-  int Close(Blob &out, int *out_len) {
-    *out_len = 0;
+  int Close(Blob &out) {
     COND_RETURN(state_ == BzipLib::Idle, BZ_OK);
     assert(state_ == BzipLib::Data || state_ == BzipLib::Error);
 
@@ -147,7 +145,7 @@ class BzipImpl : public EventEmitter {
 
     int ret = BZ_OK;
     if (state_ == BzipLib::Data) {
-      ret = BzipEndWithData(out, out_len);
+      ret = BzipEndWithData(out);
     }
 
     t.abort();
@@ -164,7 +162,7 @@ class BzipImpl : public EventEmitter {
   }
 
 
-  int BzipEndWithData(Blob &out, int *out_len) {
+  int BzipEndWithData(Blob &out) {
     // Don't expect data to be large as output buffer for deflate is as large
     // as input.
     const int Chunk = 128;
@@ -174,13 +172,13 @@ class BzipImpl : public EventEmitter {
       COND_RETURN(!out.GrowBy(Chunk), BZ_MEM_ERROR);
       
       stream_.avail_out = Chunk;
-      stream_.next_out = out.data() + *out_len;
+      stream_.next_out = out.data() + out.length();
 
       ret = BZ2_bzCompress(&stream_, BZ_FINISH);
       assert(ret != BZ_SEQUENCE_ERROR);  /* state not clobbered */
       COND_RETURN(ret != BZ_FINISH_OK && ret != BZ_STREAM_END, ret);
 
-      *out_len += (Chunk - stream_.avail_out);
+      out.IncreaseLengthBy(Chunk - stream_.avail_out);
     } while (ret != BZ_STREAM_END);
     return BZ_OK;
   }
@@ -268,8 +266,7 @@ class BunzipImpl : public EventEmitter {
   }
 
 
-  int Write(const char *data, int data_len, Blob &out, int *out_len) {
-    *out_len = 0;
+  int Write(const char *data, int data_len, Blob &out) {
     COND_RETURN(state_ == BzipLib::Eos, BZ_OK);
     COND_RETURN(state_ != BzipLib::Data, BZ_SEQUENCE_ERROR);
 
@@ -280,7 +277,7 @@ class BunzipImpl : public EventEmitter {
       COND_RETURN(!out.GrowBy(data_len), BZ_MEM_ERROR);
 
       stream_.next_in = (char*)data;
-      stream_.next_out = out.data() + *out_len;
+      stream_.next_out = out.data() + out.length();
       stream_.avail_in = data_len;
       stream_.avail_out = data_len;
 
@@ -288,7 +285,7 @@ class BunzipImpl : public EventEmitter {
       assert(ret != BZ_SEQUENCE_ERROR);  /* state not clobbered */
       COND_RETURN(ret != BZ_OK && ret != BZ_STREAM_END, ret);
 
-      *out_len += data_len - stream_.avail_out;
+      out.IncreaseLengthBy(data_len - stream_.avail_out);
       data += data_len - stream_.avail_in;
       data_len = stream_.avail_in;
 
@@ -302,8 +299,7 @@ class BunzipImpl : public EventEmitter {
   }
 
 
-  int Close(Blob &out, int *out_len) {
-    *out_len = 0;
+  int Close(Blob &out) {
     return BZ_OK;
   }
 

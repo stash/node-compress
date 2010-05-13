@@ -100,8 +100,7 @@ class GzipImpl : public EventEmitter {
   }
 
 
-  int Write(char *data, int data_len, Blob &out, int *out_len) {
-    *out_len = 0;
+  int Write(char *data, int data_len, Blob &out) {
     COND_RETURN(state_ != GzipLib::Data, Z_STREAM_ERROR);
 
     GzipLib::Transition t(state_, GzipLib::Error);
@@ -119,13 +118,13 @@ class GzipImpl : public EventEmitter {
         COND_RETURN(!out.GrowBy(CHUNK), Z_MEM_ERROR);
 
         stream_.avail_out = CHUNK;
-        stream_.next_out = out.data() + *out_len;
+        stream_.next_out = out.data() + out.length();
 
         ret = deflate(&stream_, Z_NO_FLUSH);
         assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
         COND_RETURN(ret != Z_OK, ret);
 
-        *out_len += (CHUNK - stream_.avail_out);
+        out.IncreaseLengthBy(CHUNK - stream_.avail_out);
       } while (stream_.avail_out == 0);
 
       data += CHUNK;
@@ -137,15 +136,14 @@ class GzipImpl : public EventEmitter {
   }
 
 
-  int Close(Blob &out, int *out_len) {
-    *out_len = 0;
+  int Close(Blob &out) {
     COND_RETURN(state_ == GzipLib::Idle, Z_OK);
     assert(state_ == GzipLib::Data || state_ == GzipLib::Error);
 
     GzipLib::Transition t(state_, GzipLib::Error);
     int ret = Z_OK;
     if (state_ == GzipLib::Data) {
-      ret = GzipEndWithData(out, out_len);
+      ret = GzipEndWithData(out);
     }
 
     t.abort();
@@ -162,7 +160,7 @@ class GzipImpl : public EventEmitter {
   }
 
 
-  int GzipEndWithData(Blob &out, int *out_len) {
+  int GzipEndWithData(Blob &out) {
     int ret;
 
     stream_.avail_in = 0;
@@ -171,13 +169,13 @@ class GzipImpl : public EventEmitter {
       COND_RETURN(!out.GrowBy(CHUNK), Z_MEM_ERROR);
 
       stream_.avail_out = CHUNK;
-      stream_.next_out = out.data() + *out_len;
+      stream_.next_out = out.data() + out.length();
 
       ret = deflate(&stream_, Z_FINISH);
       assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
       COND_RETURN(ret != Z_OK && ret != Z_STREAM_END, ret);
 
-      *out_len += (CHUNK - stream_.avail_out);
+      out.IncreaseLengthBy(CHUNK - stream_.avail_out);
     } while (ret != Z_STREAM_END);
     return ret;
   }
@@ -253,8 +251,7 @@ class GunzipImpl : public EventEmitter {
   }
 
 
-  int Write(const char* data, int data_len, Blob &out, int *out_len) {
-    *out_len = 0;
+  int Write(const char* data, int data_len, Blob &out) {
     COND_RETURN(state_ == GzipLib::Eos, Z_OK);
     COND_RETURN(state_ != GzipLib::Data, Z_STREAM_ERROR);
 
@@ -273,7 +270,7 @@ class GunzipImpl : public EventEmitter {
         COND_RETURN(!out.GrowBy(CHUNK), Z_MEM_ERROR);
         
         stream_.avail_out = CHUNK;
-        stream_.next_out = out.data() + *out_len;
+        stream_.next_out = out.data() + out.length();
 
         ret = inflate(&stream_, Z_NO_FLUSH);
         assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
@@ -289,7 +286,7 @@ class GunzipImpl : public EventEmitter {
         }
         COND_RETURN(ret != Z_OK && ret != Z_STREAM_END, ret);
         
-        *out_len += (CHUNK - stream_.avail_out);
+        out.IncreaseLengthBy(CHUNK - stream_.avail_out);
 
         if (ret == Z_STREAM_END) {
           t.alter(GzipLib::Eos);
@@ -304,8 +301,7 @@ class GunzipImpl : public EventEmitter {
   }
 
 
-  int Close(Blob &out, int *out_len) {
-    *out_len = 0;
+  int Close(Blob &out) {
     this->Destroy();
     return Z_OK;
   }
