@@ -65,6 +65,11 @@ class ScopedOutputBuffer {
   size_t length() const {
     return length_;
   }
+
+
+  size_t avail() const {
+    return capacity_ - length_;
+  }
  
  private:
   bool GrowTo(size_t sz) {

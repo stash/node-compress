@@ -46,10 +46,12 @@ class StateTransition {
 
 
 template <class Processor>
-class ZipLib {
+class ZipLib : ObjectWrap {
  private:
   typedef typename Processor::Utils Utils;
   typedef typename Processor::Blob Blob;
+
+  typedef ZipLib<Processor> Self;
 
  public:
   static void Initialize(v8::Handle<v8::Object> target)
@@ -71,12 +73,23 @@ class ZipLib {
 
  public:
   static Handle<Value> New(const Arguments &args) {
-    return Processor::New(args);
+    Self *result = new Self();
+    result->Wrap(args.This());
+
+    Transition t(result->state_, Self::Error);
+
+    Handle<Value> exception = result->processor_.Init(args);
+    if (!exception->IsUndefined()) {
+      return exception;
+    }
+
+    t.alter(Self::Data);
+    return args.This();
   }
 
 
   static Handle<Value> Write(const Arguments& args) {
-    Processor *proc = ObjectWrap::Unwrap<Processor>(args.This());
+    Self *proc = ObjectWrap::Unwrap<Self>(args.This());
 
     HandleScope scope;
 
@@ -105,7 +118,7 @@ class ZipLib {
 
 
   static Handle<Value> Close(const Arguments& args) {
-    Processor *proc = ObjectWrap::Unwrap<Processor>(args.This());
+    Self *proc = ObjectWrap::Unwrap<Self>(args.This());
 
     HandleScope scope;
 
@@ -127,10 +140,83 @@ class ZipLib {
 
 
   static Handle<Value> Destroy(const Arguments& args) {
-    Processor *proc = ObjectWrap::Unwrap<Processor>(args.This());
+    Self *proc = ObjectWrap::Unwrap<Self>(args.This());
     proc->Destroy();
 
     return Undefined();
+  }
+
+
+ private:
+
+  ZipLib()
+    : ObjectWrap(), state_(Self::Idle)
+  {}
+
+
+  ~ZipLib() {
+    this->Destroy();
+  }
+
+
+  int Write(char *data, int dataLength, Blob &out) {
+    COND_RETURN(state_ != Self::Data, Utils::StatusSequenceError());
+
+    Transition t(state_, Self::Error);
+
+    data += dataLength;
+    int ret = Utils::StatusOk();
+    while (dataLength > 0) { 
+      COND_RETURN(!out.GrowBy(dataLength + 1), Utils::StatusMemoryError());
+      
+      ret = this->processor_.Write(data - dataLength, dataLength, out);
+      COND_RETURN(Utils::IsError(ret), ret);
+      if (ret == Utils::StatusEndOfStream()) {
+        t.alter(Self::Eos);
+        return ret;
+      }
+    }
+    t.abort();
+    return Utils::StatusOk();
+  }
+
+
+  int Close(Blob &out) {
+    COND_RETURN(state_ == Self::Idle || state_ == Self::Destroyed,
+        Utils::StatusOk());
+
+    Transition t(state_, Self::Error);
+
+    int ret = Utils::StatusOk();
+    if (state_ == Self::Data) {
+      ret = Finish(out);
+    }
+
+    t.abort();
+    this->Destroy();
+    return ret;
+  }
+
+
+  void Destroy() {
+    if (state_ != Self::Idle && state_ != Self::Destroyed) {
+      this->processor_.Destroy();
+    }
+    state_ = Self::Destroyed;
+  }
+
+
+  int Finish(Blob &out) {
+    const int Chunk = 128;
+
+    int ret;
+    do {
+      COND_RETURN(!out.GrowBy(Chunk), Utils::StatusMemoryError());
+      
+      ret = this->processor_.Finish(out);
+      COND_RETURN(Utils::IsError(ret), ret);
+    } while (ret != Utils::StatusEndOfStream());
+    return Utils::StatusOk();
   }
 
 
@@ -189,6 +275,7 @@ class ZipLib {
 
   enum State {
     Idle,
+    Destroyed,
     Data,
     Eos,
     Error
@@ -196,6 +283,9 @@ class ZipLib {
 
   typedef StateTransition<State> Transition;
 
+ private:
+  Processor processor_;
+  State state_;
 };
 
 #endif

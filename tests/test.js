@@ -14,6 +14,7 @@ function createBuffer(str, enc) {
 
 // Create gzip stream
 var gzip = new compress.Gzip(4);
+sys.puts('gzip created');
 
 // Pump data to be compressed
 var gzdata1, gzdata2, gzdata3;
