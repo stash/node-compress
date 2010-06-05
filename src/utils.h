@@ -112,6 +112,7 @@ class Queue {
     if (EnsureCapacity()) {
       size_t index = (initial_ + length_) % capacity_;
       data_[index] = value;
+      ++length_;
       return true;
     }
     return false;
@@ -143,7 +144,7 @@ class Queue {
       return true;
     }
 
-    size_t new_capacity = capacity_ + capacity_ >> 1 + 10;
+    size_t new_capacity = capacity_ + (capacity_ >> 1) + 10;
     E *data = new E[new_capacity];
     if (data == 0) {
       return false;

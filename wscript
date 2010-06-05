@@ -8,7 +8,6 @@ VERSION = "0.1.1"
 
 def set_options(opt):
   opt.tool_options("compiler_cxx")
-  opt.tool_options("compiler_cc")
 
   opt.add_option('--with-gzip', dest='gzip', action='store_true', default=True)
   opt.add_option('--no-gzip', dest='gzip', action='store_false')
@@ -17,7 +16,6 @@ def set_options(opt):
 
 def configure(conf):
   conf.check_tool("compiler_cxx")
-  conf.check_tool("compiler_cc")
   conf.check_tool("node_addon")
 
   conf.env.DEFINES = []
@@ -39,6 +37,7 @@ def configure(conf):
 
 def build(bld):
   obj = bld.new_task_gen("cxx", "shlib", "node_addon")
+  obj.cxxflags = ["-g", "-D_FILE_OFFSET_BITS=64", "-D_LARGEFILE_SOURCE", "-Wall"]
   obj.target = "compress-bindings"
   obj.source = "src/compress.cc"
   obj.defines = bld.env.DEFINES

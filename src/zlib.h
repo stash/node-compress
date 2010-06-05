@@ -123,6 +123,7 @@ class ZipLib : ObjectWrap {
     }
 
     Self *self() const {
+      assert(this != 0);
       return self_;
     }
 
@@ -199,13 +200,7 @@ class ZipLib : ObjectWrap {
     }
 
     Request *request = Request::Write(proc, args[0], cb);
-    
-    eio_custom(Self::DoPushRequest, EIO_PRI_DEFAULT,
-        Self::DoHandleCallbacks, request);
-
-    ev_ref(EV_DEFAULT_UC);
-    proc->Ref();
-
+    proc->ProcessRequest(request);
     return Undefined();
   }
 
@@ -223,12 +218,7 @@ class ZipLib : ObjectWrap {
     }  
 
     Request *request = Request::Close(proc, cb);
-    eio_custom(Self::DoPushRequest, EIO_PRI_DEFAULT,
-        Self::DoHandleCallbacks, request);
-
-    ev_ref(EV_DEFAULT_UC);
-    proc->Ref();
-
+    proc->ProcessRequest(request);
     return Undefined();
   }
 
@@ -237,30 +227,36 @@ class ZipLib : ObjectWrap {
     Self *proc = ObjectWrap::Unwrap<Self>(args.This());
 
     Request *request = Request::Destroy(proc);
-    eio_custom(Self::DoPushRequest, EIO_PRI_DEFAULT,
-        Self::DoHandleCallbacks, request);
-
-    ev_ref(EV_DEFAULT_UC);
-    proc->Ref();
-
+    proc->ProcessRequest(request);
     return Undefined();
   }
 
 
  private:
-  static int DoPushRequest(eio_req *req) {
-    Request *request = static_cast<Request*>(req->data);
-
-    Self *self = request->self();
-    pthread_mutex_lock(&self->requestsMutex_);
-    self->requestsQueue_.Push(request);
-    bool startProcessing = !self->processorActive_;
-    if (!startProcessing) self->processorActive_ = true;
-    pthread_mutex_unlock(&self->requestsMutex_);
-
-    if (startProcessing) {
-      self->DoProcess();
+  void ProcessRequest(Request *request) {
+    if (PushRequest(request)) {
+      eio_custom(Self::DoProcess, EIO_PRI_DEFAULT,
+          Self::DoHandleCallbacks, request);
     }
+    ev_ref(EV_DEFAULT_UC);
+    Ref();
+  }
+
+  bool PushRequest(Request *request) {
+    pthread_mutex_lock(&requestsMutex_);
+    requestsQueue_.Push(request);
+    bool startProcessing = !processorActive_;
+    if (startProcessing) {
+      processorActive_ = true;
+    }
+    pthread_mutex_unlock(&requestsMutex_);
+
+    return startProcessing;
+  }
+
+  static int DoProcess(eio_req *req) {
+    Self *self = reinterpret_cast<Request*>(req->data)->self();
+    self->DoProcess();
     return 0;
   }
 
@@ -287,30 +283,38 @@ class ZipLib : ObjectWrap {
   void DoProcess() {
     Request *request;
 
-    while (ReentrantPop(requestsQueue_, requestsMutex_, request)) {
-      switch (request->kind()) {
-        case Request::RWrite:
-          request->setStatus(
-              this->Write(request->buffer(), request->length(),
-                request->output()));
-          break;
+    volatile bool flag;
+    do {
+      while (ReentrantPop(requestsQueue_, requestsMutex_, request)) {
+        switch (request->kind()) {
+          case Request::RWrite:
+            request->setStatus(
+                this->Write(request->buffer(), request->length(),
+                  request->output()));
+            break;
 
-        case Request::RClose:
-          request->setStatus(this->Close(request->output()));
-          break;
+          case Request::RClose:
+            request->setStatus(this->Close(request->output()));
+            break;
 
-        case Request::RDestroy:
-          this->Destroy();
-          request->setStatus(Utils::StatusOk());
-          break;
+          case Request::RDestroy:
+            this->Destroy();
+            request->setStatus(Utils::StatusOk());
+            break;
+        }
+
+        pthread_mutex_lock(&callbackMutex_);
+        callbackQueue_.Push(request);
+        pthread_mutex_unlock(&callbackMutex_);
+        ev_async_send(&callbackNotify_);
       }
-    }
 
-    pthread_mutex_lock(&requestsMutex_);
-    processorActive_ = false;
-    pthread_mutex_unlock(&requestsMutex_);
+      pthread_mutex_lock(&requestsMutex_);
+      flag = requestsQueue_.length() != 0;
+      processorActive_ = flag;
+      pthread_mutex_unlock(&requestsMutex_);
+    } while (flag);
 
-    ev_async_send(&callbackNotify_);
   }
 
   static bool ReentrantPop(Queue<Request*> &queue, pthread_mutex_t &mutex,
@@ -488,6 +492,11 @@ class ZipLib : ObjectWrap {
 };
 
 template <class T> bool ZipLib<T>::callbackInitialized_ = false;
+template <class T> pthread_mutex_t ZipLib<T>::callbackMutex_;
+template <class T> ev_async ZipLib<T>::callbackNotify_;
+
+template <class T>
+Queue<typename ZipLib<T>::Request*> ZipLib<T>::callbackQueue_;
 
 #endif
 
