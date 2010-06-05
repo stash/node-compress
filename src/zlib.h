@@ -16,40 +16,6 @@
 using namespace v8;
 using namespace node;
 
-template <class T>
-class StateTransition {
- public:
-  StateTransition(T &ref, T value)
-    : reference_(ref), value_(value), abort_(false)
-  {}
-
-  ~StateTransition() {
-    if (!abort_) {
-      reference_ = value_;
-    }
-  }
-
-  void alter(T value) {
-    value_ = value;
-  }
-
-  void abort(bool value = true) {
-    abort_ = value;
-  }
-
- private:
-  T &reference_;
-  T value_;
-  bool abort_;
-
- private:
-  StateTransition(StateTransition&);
-  StateTransition(const StateTransition&);
-  StateTransition& operator=(StateTransition&);
-  StateTransition& operator=(const StateTransition&);
-};
-
-
 template <class Processor>
 class ZipLib : ObjectWrap {
  private:
@@ -208,9 +174,9 @@ class ZipLib : ObjectWrap {
       cb = Local<Function>::Cast(args[1]);
     }
 
-    Self *proc = ObjectWrap::Unwrap<Self>(args.This());
-    Request *request = Request::Write(proc, args[0], cb);
-    return proc->ProcessRequest(request);
+    Self *self = ObjectWrap::Unwrap<Self>(args.This());
+    Request *request = Request::Write(self, args[0], cb);
+    return self->PushRequest(request);
   }
 
 
@@ -225,69 +191,57 @@ class ZipLib : ObjectWrap {
       cb = Local<Function>::Cast(args[0]);
     }
 
-    Self *proc = ObjectWrap::Unwrap<Self>(args.This());
-    Request *request = Request::Close(proc, cb);
-    return proc->ProcessRequest(request);
+    Self *self = ObjectWrap::Unwrap<Self>(args.This());
+    Request *request = Request::Close(self, cb);
+    return self->PushRequest(request);
   }
 
 
   static Handle<Value> Destroy(const Arguments& args) {
     HandleScope scope;
 
-    Self *proc = ObjectWrap::Unwrap<Self>(args.This());
-    Request *request = Request::Destroy(proc);
-    return proc->ProcessRequest(request);
+    Self *self = ObjectWrap::Unwrap<Self>(args.This());
+    Request *request = Request::Destroy(self);
+    return self->PushRequest(request);
   }
 
 
  private:
-  Handle<Value> ProcessRequest(Request *request) {
+  // Attempt to push request.
+  // Executed in V8 thread.
+  Handle<Value> PushRequest(Request *request) {
     if (request == 0) {
       return ThrowGentleOom();
     }
-    if (PushRequest(request)) {
+
+    pthread_mutex_lock(&requestsMutex_);
+    bool pushed = requestsQueue_.Push(request);
+    bool startProcessing = !processorActive_;
+    if (pushed && startProcessing) {
+      processorActive_ = true;
+    }
+    pthread_mutex_unlock(&requestsMutex_);
+    
+    if (!pushed) {
+      return ThrowGentleOom();
+    }
+
+    if (startProcessing) {
       eio_custom(Self::DoProcess, EIO_PRI_DEFAULT,
           Self::DoHandleCallbacks, request);
     }
+
     ev_ref(EV_DEFAULT_UC);
     Ref();
     return Undefined();
   }
 
-  bool PushRequest(Request *request) {
-    pthread_mutex_lock(&requestsMutex_);
-    requestsQueue_.Push(request);
-    bool startProcessing = !processorActive_;
-    if (startProcessing) {
-      processorActive_ = true;
-    }
-    pthread_mutex_unlock(&requestsMutex_);
-
-    return startProcessing;
-  }
-
+  // Process requests queue.
+  // Executed in worker thread.
   static int DoProcess(eio_req *req) {
     Self *self = reinterpret_cast<Request*>(req->data)->self();
     self->DoProcess();
     return 0;
-  }
-
-  static int DoHandleCallbacks(eio_req *req) {
-    Request *request;
-    while (ReentrantPop(callbackQueue_, callbackMutex_, request)) {
-      Self *self = request->self();
-      self->DoCallback(request->callback(),
-          request->status(), request->output());
-
-      ev_unref(EV_DEFAULT_UC);
-      self->Unref();
-      delete request;
-    }
-    return 0;
-  }
-
-  static void DoHandleCallbacks2(EV_P_ ev_async *evt, int revents) {
-    DoHandleCallbacks(0);
   }
 
   void DoProcess() {
@@ -314,9 +268,18 @@ class ZipLib : ObjectWrap {
         }
 
         pthread_mutex_lock(&callbackMutex_);
-        callbackQueue_.Push(request);
+        bool success = callbackQueue_.Push(request);
         pthread_mutex_unlock(&callbackMutex_);
         ev_async_send(&callbackNotify_);
+
+        // Unref counter triggered by request.
+        ev_unref(EV_DEFAULT_UC);
+        if (!success) {
+          // Normally we should unref self() after callback called in
+          // DoHandleCallbacks(), but as we failed to push request for 
+          // callback for this request, we should unref here.
+          request->self()->Unref();
+        }
       }
 
       pthread_mutex_lock(&requestsMutex_);
@@ -327,6 +290,26 @@ class ZipLib : ObjectWrap {
 
   }
 
+  // Handle callbacks.
+  // Executed in V8 threads.
+  static int DoHandleCallbacks(eio_req *req) {
+    Request *request;
+    while (ReentrantPop(callbackQueue_, callbackMutex_, request)) {
+      Self *self = request->self();
+      self->DoCallback(request->callback(),
+          request->status(), request->output());
+
+      self->Unref();
+      delete request;
+    }
+    return 0;
+  }
+
+  static void DoHandleCallbacks2(EV_P_ ev_async *evt, int revents) {
+    DoHandleCallbacks(0);
+  }
+
+ private:
   static bool ReentrantPop(Queue<Request*> &queue, pthread_mutex_t &mutex,
       Request*& request) {
     request = 0;

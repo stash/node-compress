@@ -1,6 +1,8 @@
 #ifndef NODE_COMPRESS_UTILS_H__
 #define NODE_COMPRESS_UTILS_H__
 
+#include <new>
+
 #include <assert.h>
 
 #define COND_RETURN(cond, ret) \
@@ -145,7 +147,7 @@ class Queue {
     }
 
     size_t new_capacity = capacity_ + (capacity_ >> 1) + 10;
-    E *data = new E[new_capacity];
+    E *data = new(std::nothrow) E[new_capacity];
     if (data == 0) {
       return false;
     }
@@ -166,6 +168,40 @@ class Queue {
   size_t length_;
   size_t capacity_;
   E *data_;
+};
+
+
+template <class T>
+class StateTransition {
+ public:
+  StateTransition(T &ref, T value)
+    : reference_(ref), value_(value), abort_(false)
+  {}
+
+  ~StateTransition() {
+    if (!abort_) {
+      reference_ = value_;
+    }
+  }
+
+  void alter(T value) {
+    value_ = value;
+  }
+
+  void abort(bool value = true) {
+    abort_ = value;
+  }
+
+ private:
+  T &reference_;
+  T value_;
+  bool abort_;
+
+ private:
+  StateTransition(StateTransition&);
+  StateTransition(const StateTransition&);
+  StateTransition& operator=(StateTransition&);
+  StateTransition& operator=(const StateTransition&);
 };
 
 
