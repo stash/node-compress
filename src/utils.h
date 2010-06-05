@@ -99,5 +99,74 @@ class ScopedOutputBuffer {
 };
 
 typedef ScopedOutputBuffer<char> ScopedBlob;
+
+
+template <class E>
+class Queue {
+ public:
+  Queue()
+    : initial_(0), length_(0), capacity_(0), data_(0)
+  {}
+
+  bool Push(E value) {
+    if (EnsureCapacity()) {
+      size_t index = (initial_ + length_) % capacity_;
+      data_[index] = value;
+      return true;
+    }
+    return false;
+  }
+
+  E Pop() {
+    if (length_ == 0) {
+      return E();
+    }
+    E result = data_[initial_];
+    if (++initial_ == capacity_) {
+      initial_ = 0;
+    }
+    --length_;
+    return result;
+  }
+
+  ~Queue() {
+    delete []data_;
+  }
+
+  size_t length() const {
+    return length_;
+  }
+
+ private:
+  bool EnsureCapacity() {
+    if (length_ < capacity_) {
+      return true;
+    }
+
+    size_t new_capacity = capacity_ + capacity_ >> 1 + 10;
+    E *data = new E[new_capacity];
+    if (data == 0) {
+      return false;
+    }
+    for (size_t i = 0; i < length_; ++i) {
+      data[i] = data_[(initial_ + i) % capacity_];
+    }
+
+    delete[] data_;
+
+    data_ = data;
+    initial_ = 0;
+    capacity_ = new_capacity;
+    return true;
+  }
+
+ private:
+  size_t initial_;
+  size_t length_;
+  size_t capacity_;
+  E *data_;
+};
+
+
 #endif
 
