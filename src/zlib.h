@@ -81,32 +81,39 @@ class ZipLib : ObjectWrap {
       RDestroy
     };
    private:
-    Request(Kind kind, ZipLib *self, Local<Value> callback)
-      : kind_(kind), self_(self), callback_(callback)
-    {}
-
-    Request(ZipLib *self, Local<Value> inputBuffer, Local<Value> callback)
+    Request(ZipLib *self, Local<Value> inputBuffer, Local<Function> callback)
       : kind_(RWrite), self_(self),
-      buffer_(inputBuffer), data_(GetBuffer(inputBuffer)->data()),
-      length_(GetBuffer(inputBuffer)->length()), callback_(callback) 
+      buffer_(Persistent<Value>::New(inputBuffer)),
+      data_(GetBuffer(inputBuffer)->data()),
+      length_(GetBuffer(inputBuffer)->length()),
+      callback_(Persistent<Function>::New(callback))
     {}
     
-    static Buffer *GetBuffer(Local<Value> &buffer) {
+    Request(ZipLib *self, Local<Function> callback)
+      : kind_(RClose), self_(self),
+      callback_(Persistent<Function>::New(callback))
+    {}
+
+    Request(ZipLib *self)
+      : kind_(RDestroy), self_(self)
+    {}
+
+    static Buffer *GetBuffer(Local<Value> buffer) {
       return ObjectWrap::Unwrap<Buffer>(buffer->ToObject());
     }
 
    public:
     static Request* Write(Self *self, Local<Value> inputBuffer,
-        Local<Value> callback) {
+        Local<Function> callback) {
       return new Request(self, inputBuffer, callback);
     }
 
-    static Request* Close(Self *self, Local<Value> callback) {
-      return new Request(RClose, self, callback);
+    static Request* Close(Self *self, Local<Function> callback) {
+      return new Request(self, callback);
     }
 
     static Request* Destroy(Self *self) {
-      return new Request(RDestroy, self, Local<Value>::New(Undefined()));
+      return new Request(self);
     }
 
    public:
@@ -139,7 +146,7 @@ class ZipLib : ObjectWrap {
       return status_;
     }
 
-    Persistent<Value> callback() const {
+    Persistent<Function> callback() const {
       return callback_;
     }
 
@@ -155,7 +162,7 @@ class ZipLib : ObjectWrap {
     char *data_;
     int length_;
 
-    Persistent<Value> callback_;
+    Persistent<Function> callback_;
 
     // Output structures.
     Blob out_;
@@ -192,11 +199,12 @@ class ZipLib : ObjectWrap {
 
     Buffer *buffer = ObjectWrap::Unwrap<Buffer>(args[0]->ToObject());
 
-    Local<Value> cb(args[1]);
+    Local<Function> cb;
     if (args.Length() > 1 && !args[1]->IsUndefined()) {
       if (!args[1]->IsFunction()) {
         return ThrowCallbackExpected();
       }
+      cb = Local<Function>::Cast(args[1]);
     }
 
     Request *request = Request::Write(proc, args[0], cb);
@@ -210,12 +218,13 @@ class ZipLib : ObjectWrap {
 
     HandleScope scope;
 
-    Local<Value> cb(args[0]);
+    Local<Function> cb;
     if (args.Length() > 0 && !args[0]->IsUndefined()) {
       if (!args[0]->IsFunction()) {
         return ThrowCallbackExpected();
       }
-    }  
+      cb = Local<Function>::Cast(args[0]);
+    }
 
     Request *request = Request::Close(proc, cb);
     proc->ProcessRequest(request);
@@ -262,16 +271,14 @@ class ZipLib : ObjectWrap {
 
   static int DoHandleCallbacks(eio_req *req) {
     Request *request;
-
-    HandleScope scope;
-
     while (ReentrantPop(callbackQueue_, callbackMutex_, request)) {
       Self *self = request->self();
-      Local<Value> cb(*request->callback());
-      self->DoCallback(cb, request->status(), request->output());
+      self->DoCallback(request->callback(),
+          request->status(), request->output());
 
       ev_unref(EV_DEFAULT_UC);
       self->Unref();
+      delete request;
     }
     return 0;
   }
@@ -449,16 +456,17 @@ class ZipLib : ObjectWrap {
   }
 
 
-  static void DoCallback(Local<Value> &cb, int r, Blob &out) {
-    if (cb->IsFunction()) {
+  static void DoCallback(Persistent<Function> cb, int r, Blob &out) {
+    if (!cb.IsEmpty()) {
+      HandleScope scope;
+
       Local<Value> argv[2];
       argv[0] = Utils::GetException(r);
       argv[1] = Encode(out.data(), out.length(), BINARY);
 
       TryCatch try_catch;
 
-      Function *fun = Function::Cast(*cb);
-      fun->Call(Context::GetCurrent()->Global(), 2, argv);
+      cb->Call(Context::GetCurrent()->Global(), 2, argv);
 
       if (try_catch.HasCaught()) {
         FatalException(try_catch);
