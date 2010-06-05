@@ -1,6 +1,8 @@
 #ifndef NODE_COMPRESS_ZLIB_H__
 #define NODE_COMPRESS_ZLIB_H__
 
+#include <pthread.h>
+
 #include <node.h>
 #include <node_events.h>
 #include <node_buffer.h>
@@ -84,7 +86,9 @@ class ZipLib : ObjectWrap {
     {}
 
     Request(ZipLib *self, Local<Value> &inputBuffer, Local<Function> &callback)
-      : kind_(RWrite), self_(self), buffer_(inputBuffer), callback_(callback) 
+      : kind_(RWrite), self_(self),
+      buffer_(inputBuffer), data_(GetBuffer(inputBuffer)->data()),
+      length_(GetBuffer(inputBuffer)->length()), callback_(callback) 
     {}
 
    public:
@@ -101,10 +105,40 @@ class ZipLib : ObjectWrap {
       return new Request(RDestroy, self, Undefined());
     }
 
+   public:
+    void setStatus(int status) {
+      status_ = status;
+    }
+    
+    const char* buffer() const {
+      return data;
+    }
+
+    int length() const {
+      return length;
+    }
+
+    Self *self() const {
+      return self;
+    }
+
+    Blob &output() const {
+      return out_;
+    }
+
    private:
     ZipLib *self_;
+
+    // We store persistent Buffer object reference to avoid garbage collection,
+    // but it's not thread-safe to reference it from non-JS script, so we also
+    // store raw buffer data and length.
     Persistent<Value> buffer_;
+    const char *data_;
+    int length_;
+
     Persistent<Value> callback_;
+
+    // Output structures.
     Blob out_;
     int status_;
   };
@@ -206,10 +240,68 @@ class ZipLib : ObjectWrap {
 
 
  private:
+  static DoPushRequest(void *rawRequest) {
+    Request *request = static_cast<Request*>(rawRequest);
+
+    Self *self = request->self();
+    pthread_mutex_lock(&self->mutex_);
+    self->queue_.Push(request);
+    bool startProcessing = !self->processorActive_;
+    if (!startProcessing) self->processorActive_ = true;
+    pthread_mutex_unlock(&self->mutex_);
+
+    if (startProcessing) {
+      self->DoProcess();
+    }
+  }
+
+  void DoProcess() {
+    Request *request;
+
+    while (ReentrantPop(request)) {
+      switch (request->kind()) {
+        case RWrite:
+          request->setResult(
+              this->Write(request->buffer(), request->length(),
+                request->output()));
+          break;
+
+        case RClose:
+          request->setResult(this->Close(request->output()));
+          break;
+
+        case RDestroy:
+          this->Destroy();
+          request->setResult(Utils::StatusOk());
+          break;
+      }
+    }
+
+    pthread_mutex_lock(&mutex_);
+    processorActive_ = false;
+    pthread_mutex_unlock(&mutex_);
+  }
+
+  bool ReentrantPop(Request*& request) {
+    request = 0;
+
+    pthread_mutex_lock(&mutex_);
+    bool result = self->queue_.length() != 0;
+    if (result) {
+      request = self->queue_.Pop();
+    }
+    pthread_mutex_unlock(&mutex_);
+
+    return result;
+  }
+
+ private:
 
   ZipLib()
-    : ObjectWrap(), state_(Self::Idle)
-  {}
+    : ObjectWrap(), state_(Self::Idle), processorActive_(false)
+  {
+    mutex_ = PTHREAD_MUTEX_INITIALIZER;
+  }
 
 
   ~ZipLib() {
@@ -305,8 +397,7 @@ class ZipLib : ObjectWrap {
 
     return ThrowException(Utils::GetException(zipStatus));
   }
-
-  
+ 
   static Handle<Value> ThrowCallbackExpected() {
     Local<Value> exception = Exception::TypeError(
         String::New("Callback must be a function"));
@@ -344,6 +435,10 @@ class ZipLib : ObjectWrap {
  private:
   Processor processor_;
   State state_;
+  pthread_mutex_t mutex_;
+  Queue<Request*> queue_;
+
+  volatile bool processorActive_;
 };
 
 #endif
