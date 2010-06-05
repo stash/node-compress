@@ -1,6 +1,9 @@
 #ifndef NODE_COMPRESS_ZLIB_H__
 #define NODE_COMPRESS_ZLIB_H__
 
+// To have (std::nothrow).
+#include <new>
+
 #include <pthread.h>
 
 #include <node.h>
@@ -105,15 +108,15 @@ class ZipLib : ObjectWrap {
    public:
     static Request* Write(Self *self, Local<Value> inputBuffer,
         Local<Function> callback) {
-      return new Request(self, inputBuffer, callback);
+      return new(std::nothrow) Request(self, inputBuffer, callback);
     }
 
     static Request* Close(Self *self, Local<Function> callback) {
-      return new Request(self, callback);
+      return new(std::nothrow) Request(self, callback);
     }
 
     static Request* Destroy(Self *self) {
-      return new Request(self);
+      return new(std::nothrow) Request(self);
     }
 
    public:
@@ -171,11 +174,13 @@ class ZipLib : ObjectWrap {
 
  public:
   static Handle<Value> New(const Arguments &args) {
-    Self *result = new Self();
+    Self *result = new(std::nothrow) Self();
+    if (result == 0) {
+      return ThrowGentleOom();
+    }
     result->Wrap(args.This());
 
     Transition t(result->state_, Self::Error);
-
     Handle<Value> exception = result->processor_.Init(args);
     if (!exception->IsUndefined()) {
       return exception;
@@ -187,8 +192,6 @@ class ZipLib : ObjectWrap {
 
 
   static Handle<Value> Write(const Arguments& args) {
-    Self *proc = ObjectWrap::Unwrap<Self>(args.This());
-
     HandleScope scope;
 
     if (!Buffer::HasInstance(args[0])) {
@@ -196,8 +199,6 @@ class ZipLib : ObjectWrap {
           String::New("Input must be of type Buffer"));
       return ThrowException(exception);
     }
-
-    Buffer *buffer = ObjectWrap::Unwrap<Buffer>(args[0]->ToObject());
 
     Local<Function> cb;
     if (args.Length() > 1 && !args[1]->IsUndefined()) {
@@ -207,15 +208,13 @@ class ZipLib : ObjectWrap {
       cb = Local<Function>::Cast(args[1]);
     }
 
+    Self *proc = ObjectWrap::Unwrap<Self>(args.This());
     Request *request = Request::Write(proc, args[0], cb);
-    proc->ProcessRequest(request);
-    return Undefined();
+    return proc->ProcessRequest(request);
   }
 
 
   static Handle<Value> Close(const Arguments& args) {
-    Self *proc = ObjectWrap::Unwrap<Self>(args.This());
-
     HandleScope scope;
 
     Local<Function> cb;
@@ -226,29 +225,33 @@ class ZipLib : ObjectWrap {
       cb = Local<Function>::Cast(args[0]);
     }
 
+    Self *proc = ObjectWrap::Unwrap<Self>(args.This());
     Request *request = Request::Close(proc, cb);
-    proc->ProcessRequest(request);
-    return Undefined();
+    return proc->ProcessRequest(request);
   }
 
 
   static Handle<Value> Destroy(const Arguments& args) {
-    Self *proc = ObjectWrap::Unwrap<Self>(args.This());
+    HandleScope scope;
 
+    Self *proc = ObjectWrap::Unwrap<Self>(args.This());
     Request *request = Request::Destroy(proc);
-    proc->ProcessRequest(request);
-    return Undefined();
+    return proc->ProcessRequest(request);
   }
 
 
  private:
-  void ProcessRequest(Request *request) {
+  Handle<Value> ProcessRequest(Request *request) {
+    if (request == 0) {
+      return ThrowGentleOom();
+    }
     if (PushRequest(request)) {
       eio_custom(Self::DoProcess, EIO_PRI_DEFAULT,
           Self::DoHandleCallbacks, request);
     }
     ev_ref(EV_DEFAULT_UC);
     Ref();
+    return Undefined();
   }
 
   bool PushRequest(Request *request) {
@@ -449,6 +452,13 @@ class ZipLib : ObjectWrap {
     return ThrowException(Utils::GetException(zipStatus));
   }
  
+  static Handle<Value> ThrowGentleOom() {
+    V8::LowMemoryNotification();
+    Local<Value> exception = Exception::Error(
+        String::New("Insufficient space"));
+    return ThrowException(exception);
+  }
+
   static Handle<Value> ThrowCallbackExpected() {
     Local<Value> exception = Exception::TypeError(
         String::New("Callback must be a function"));
