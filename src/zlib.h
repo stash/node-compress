@@ -19,29 +19,21 @@ using namespace node;
 template <class Processor>
 class ZipLib : ObjectWrap {
  private:
+  enum State {
+    Idle,
+    Destroyed,
+    Data,
+    Eos,
+    Error
+  };
+
+ private:
   typedef typename Processor::Utils Utils;
   typedef typename Processor::Blob Blob;
 
   typedef ZipLib<Processor> Self;
+  typedef StateTransition<State> Transition;
 
- public:
-  static void Initialize(v8::Handle<v8::Object> target)
-  {
-    HandleScope scope;
-
-    Local<FunctionTemplate> t = FunctionTemplate::New(New);
-
-    t->Inherit(EventEmitter::constructor_template);
-    t->InstanceTemplate()->SetInternalFieldCount(1);
-
-    NODE_SET_PROTOTYPE_METHOD(t, "write", Write);
-    NODE_SET_PROTOTYPE_METHOD(t, "close", Close);
-    NODE_SET_PROTOTYPE_METHOD(t, "destroy", Destroy);
-
-    target->Set(String::NewSymbol(Processor::Name), t->GetFunction());
-  }
-
- private:
   struct Request {
    public:
     enum Kind {
@@ -137,6 +129,23 @@ class ZipLib : ObjectWrap {
     Blob out_;
     int status_;
   };
+
+ public:
+  static void Initialize(v8::Handle<v8::Object> target)
+  {
+    HandleScope scope;
+
+    Local<FunctionTemplate> t = FunctionTemplate::New(New);
+
+    t->Inherit(EventEmitter::constructor_template);
+    t->InstanceTemplate()->SetInternalFieldCount(1);
+
+    NODE_SET_PROTOTYPE_METHOD(t, "write", Write);
+    NODE_SET_PROTOTYPE_METHOD(t, "close", Close);
+    NODE_SET_PROTOTYPE_METHOD(t, "destroy", Destroy);
+
+    target->Set(String::NewSymbol(Processor::Name), t->GetFunction());
+  }
 
  public:
   static Handle<Value> New(const Arguments &args) {
@@ -309,6 +318,24 @@ class ZipLib : ObjectWrap {
     DoHandleCallbacks(0);
   }
 
+  static void DoCallback(Persistent<Function> cb, int r, Blob &out) {
+    if (!cb.IsEmpty()) {
+      HandleScope scope;
+
+      Local<Value> argv[2];
+      argv[0] = Utils::GetException(r);
+      argv[1] = Encode(out.data(), out.length(), BINARY);
+
+      TryCatch try_catch;
+
+      cb->Call(Context::GetCurrent()->Global(), 2, argv);
+
+      if (try_catch.HasCaught()) {
+        FatalException(try_catch);
+      }
+    }
+  }
+
  private:
   static bool ReentrantPop(Queue<Request*> &queue, pthread_mutex_t &mutex,
       Request*& request) {
@@ -407,28 +434,7 @@ class ZipLib : ObjectWrap {
   }
 
 
- public:
-  static Handle<Value> ReturnThisOrThrow(const Arguments &args,
-                                         int zipStatus) {
-    if (!Utils::IsError(zipStatus)) {
-      return args.This();
-    } else {
-      return ThrowError(zipStatus);
-    }
-  }
-
-
-  static Handle<Value> ReturnOrThrow(HandleScope &scope,
-                                     const Local<Value> &value,
-                                     int zipStatus) {
-    if (!Utils::IsError(zipStatus)) {
-      return scope.Close(value);
-    } else {
-      return ThrowError(zipStatus);
-    }
-  }
-
-
+ private:
   static Handle<Value> ThrowError(int zipStatus) {
     assert(Utils::IsError(zipStatus));
 
@@ -448,34 +454,6 @@ class ZipLib : ObjectWrap {
     return ThrowException(exception);
   }
 
-
-  static void DoCallback(Persistent<Function> cb, int r, Blob &out) {
-    if (!cb.IsEmpty()) {
-      HandleScope scope;
-
-      Local<Value> argv[2];
-      argv[0] = Utils::GetException(r);
-      argv[1] = Encode(out.data(), out.length(), BINARY);
-
-      TryCatch try_catch;
-
-      cb->Call(Context::GetCurrent()->Global(), 2, argv);
-
-      if (try_catch.HasCaught()) {
-        FatalException(try_catch);
-      }
-    }
-  }
-
-  enum State {
-    Idle,
-    Destroyed,
-    Data,
-    Eos,
-    Error
-  };
-
-  typedef StateTransition<State> Transition;
 
  private:
   Processor processor_;
