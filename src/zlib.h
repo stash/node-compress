@@ -70,6 +70,44 @@ class ZipLib : ObjectWrap {
     target->Set(String::NewSymbol(Processor::Name), t->GetFunction());
   }
 
+ private:
+  struct Request {
+   public:
+    enum Kind {
+      RWrite,
+      RClose,
+      RDestroy
+    };
+   private:
+    Request(Kind kind, ZipLib *self, Local<Function> &callback)
+      : kind_(kind), self_(self), callback_(callback)
+    {}
+
+    Request(ZipLib *self, Local<Value> &inputBuffer, Local<Function> &callback)
+      : kind_(RWrite), self_(self), buffer_(inputBuffer), callback_(callback) 
+    {}
+
+   public:
+    static Request* Write(ZipLib *self, Local<Value> &inputBuffer,
+        Local<Value> &callback) {
+      return new Request(self, inputBuffer, callback);
+    }
+
+    static Request* Close(ZipLib *self, Local<Value> &callback) {
+      return new Request(RClose, self, callback);
+    }
+
+    static Request* Destroy(ZipLib *self) {
+      return new Request(RDestroy, self, Undefined());
+    }
+
+   private:
+    ZipLib *self_;
+    Persistent<Value> buffer_;
+    Persistent<Value> callback_;
+    Blob out_;
+    int status_;
+  };
 
  public:
   static Handle<Value> New(const Arguments &args) {
@@ -108,11 +146,18 @@ class ZipLib : ObjectWrap {
       }
     }
 
-    Blob out;
-    int out_size;
-    int r = proc->Write(buffer->data(), buffer->length(), out);
+    Request *request = Request::Write(proc, buffer, cb);
+    
+    eio_custom(Self::DoPushRequest, EIO_PRI_DEFAULT,
+        Self::OnRequestPushed, request);
 
-    DoCallback(cb, r, out);
+    ev_ref(EV_DEFAULT_UC);
+    proc->Ref();
+
+//    Blob out;
+//    int r = proc->Write(buffer->data(), buffer->length(), out);
+//
+//    DoCallback(cb, r, out);
     return Undefined();
   }
 
@@ -129,19 +174,32 @@ class ZipLib : ObjectWrap {
       }
     }  
 
-    Blob out;
-    int out_size;
+    Request *request = Request::Close(proc, cb);
+    eio_custom(Self::DoPushRequest, EIO_PRI_DEFAULT,
+        Self::OnRequestPushed, request);
 
-    int r = proc->Close(out);
-    DoCallback(cb, r, out);
+    ev_ref(EV_DEFAULT_UC);
+    proc->Ref();
 
+//    Blob out;
+//    int r = proc->Close(out);
+//
+//    DoCallback(cb, r, out);
     return Undefined();
   }
 
 
   static Handle<Value> Destroy(const Arguments& args) {
     Self *proc = ObjectWrap::Unwrap<Self>(args.This());
-    proc->Destroy();
+
+    Request *request = Request::Destroy(proc);
+    eio_custom(Self::DoPushRequest, EIO_PRI_DEFAULT,
+        Self::OnRequestPushed, request);
+
+    ev_ref(EV_DEFAULT_UC);
+    proc->Ref();
+
+    //proc->Destroy();
 
     return Undefined();
   }
