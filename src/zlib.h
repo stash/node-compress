@@ -81,28 +81,32 @@ class ZipLib : ObjectWrap {
       RDestroy
     };
    private:
-    Request(Kind kind, ZipLib *self, Local<Function> &callback)
+    Request(Kind kind, ZipLib *self, Local<Value> callback)
       : kind_(kind), self_(self), callback_(callback)
     {}
 
-    Request(ZipLib *self, Local<Value> &inputBuffer, Local<Function> &callback)
+    Request(ZipLib *self, Local<Value> inputBuffer, Local<Value> callback)
       : kind_(RWrite), self_(self),
       buffer_(inputBuffer), data_(GetBuffer(inputBuffer)->data()),
       length_(GetBuffer(inputBuffer)->length()), callback_(callback) 
     {}
+    
+    static Buffer *GetBuffer(Local<Value> &buffer) {
+      return ObjectWrap::Unwrap<Buffer>(buffer->ToObject());
+    }
 
    public:
-    static Request* Write(ZipLib *self, Local<Value> &inputBuffer,
-        Local<Value> &callback) {
+    static Request* Write(Self *self, Local<Value> inputBuffer,
+        Local<Value> callback) {
       return new Request(self, inputBuffer, callback);
     }
 
-    static Request* Close(ZipLib *self, Local<Value> &callback) {
+    static Request* Close(Self *self, Local<Value> callback) {
       return new Request(RClose, self, callback);
     }
 
-    static Request* Destroy(ZipLib *self) {
-      return new Request(RDestroy, self, Undefined());
+    static Request* Destroy(Self *self) {
+      return new Request(RDestroy, self, Local<Value>::New(Undefined()));
     }
 
    public:
@@ -110,30 +114,44 @@ class ZipLib : ObjectWrap {
       status_ = status;
     }
     
-    const char* buffer() const {
-      return data;
+    char* buffer() const {
+      return data_;
     }
 
     int length() const {
-      return length;
+      return length_;
     }
 
     Self *self() const {
-      return self;
+      return self_;
     }
 
-    Blob &output() const {
+    Blob &output() {
       return out_;
     }
 
+    Kind kind() const {
+      return kind_;
+    }
+
+    int status() const {
+      return status_;
+    }
+
+    Persistent<Value> callback() const {
+      return callback_;
+    }
+
    private:
+    Kind kind_;
+
     ZipLib *self_;
 
     // We store persistent Buffer object reference to avoid garbage collection,
     // but it's not thread-safe to reference it from non-JS script, so we also
     // store raw buffer data and length.
     Persistent<Value> buffer_;
-    const char *data_;
+    char *data_;
     int length_;
 
     Persistent<Value> callback_;
@@ -180,7 +198,7 @@ class ZipLib : ObjectWrap {
       }
     }
 
-    Request *request = Request::Write(proc, buffer, cb);
+    Request *request = Request::Write(proc, args[0], cb);
     
     eio_custom(Self::DoPushRequest, EIO_PRI_DEFAULT,
         Self::DoHandleCallbacks, request);
@@ -230,8 +248,8 @@ class ZipLib : ObjectWrap {
 
 
  private:
-  static void DoPushRequest(void *rawRequest) {
-    Request *request = static_cast<Request*>(rawRequest);
+  static int DoPushRequest(eio_req *req) {
+    Request *request = static_cast<Request*>(req->data);
 
     Self *self = request->self();
     pthread_mutex_lock(&self->requestsMutex_);
@@ -243,19 +261,23 @@ class ZipLib : ObjectWrap {
     if (startProcessing) {
       self->DoProcess();
     }
+    return 0;
   }
 
-  static void DoHandleCallbacks(void *rawRequest) {
+  static int DoHandleCallbacks(eio_req *req) {
     Request *request;
+
+    HandleScope scope;
 
     while (ReentrantPop(callbackQueue_, callbackMutex_, request)) {
       Self *self = request->self();
-      self->DoCallback(request->callback(),
-          request->status(), request->output());
+      Local<Value> cb(*request->callback());
+      self->DoCallback(cb, request->status(), request->output());
 
       ev_unref(EV_DEFAULT_UC);
       self->Unref();
     }
+    return 0;
   }
 
   static void DoHandleCallbacks2(EV_P_ ev_async *evt, int revents) {
@@ -267,19 +289,19 @@ class ZipLib : ObjectWrap {
 
     while (ReentrantPop(requestsQueue_, requestsMutex_, request)) {
       switch (request->kind()) {
-        case RWrite:
-          request->setResult(
+        case Request::RWrite:
+          request->setStatus(
               this->Write(request->buffer(), request->length(),
                 request->output()));
           break;
 
-        case RClose:
-          request->setResult(this->Close(request->output()));
+        case Request::RClose:
+          request->setStatus(this->Close(request->output()));
           break;
 
-        case RDestroy:
+        case Request::RDestroy:
           this->Destroy();
-          request->setResult(Utils::StatusOk());
+          request->setStatus(Utils::StatusOk());
           break;
       }
     }
@@ -288,7 +310,7 @@ class ZipLib : ObjectWrap {
     processorActive_ = false;
     pthread_mutex_unlock(&requestsMutex_);
 
-    ev_async_send(callbackNotify_);
+    ev_async_send(&callbackNotify_);
   }
 
   static bool ReentrantPop(Queue<Request*> &queue, pthread_mutex_t &mutex,
@@ -310,12 +332,12 @@ class ZipLib : ObjectWrap {
   ZipLib()
     : ObjectWrap(), state_(Self::Idle), processorActive_(false)
   {
-    requestsMutex_ = PTHREAD_MUTEX_INITIALIZER;
+    pthread_mutex_init(&requestsMutex_, 0);
 
     // Lazy init. Safe to do it here as this always happen in JS-thread.
     if (!callbackInitialized_) {
-      callbackMutex_ = PTHREAD_MUTEX_INITIALIZER;
-      callbackNotify_ = ev_async_init(EV_DEFAULT_UC_ Self::DoHandleCallbacks2);
+      pthread_mutex_init(&callbackMutex_, 0);
+      ev_async_init(&callbackNotify_, Self::DoHandleCallbacks2);
       ev_async_start(&callbackNotify_);
       ev_unref();
     }
@@ -457,13 +479,15 @@ class ZipLib : ObjectWrap {
   pthread_mutex_t requestsMutex_;
   Queue<Request*> requestsQueue_;
 
-  static bool callbackInitialized_ = false;
+  static bool callbackInitialized_;
   static pthread_mutex_t callbackMutex_;
   static Queue<Request*> callbackQueue_;
   static ev_async callbackNotify_;
 
   volatile bool processorActive_;
 };
+
+template <class T> bool ZipLib<T>::callbackInitialized_ = false;
 
 #endif
 
