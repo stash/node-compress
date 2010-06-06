@@ -1,0 +1,32 @@
+2010-06-05 v0.1.5
+  * README updated.
+  * HISTORY created.
+  * Build in release instead of debug.
+
+2010-06-05 v0.1.4
+  * Report about OOM errors.
+  * Some code enhancements.
+
+2010-06-05 v0.1.3
+  * (De-)compression is performed asynchronously.
+
+2010-05-15 v0.1.2
+  * Multiple code improvements.
+  * tests/ renamed to demo/
+
+2010-05-10 v0.1.1
+  * Streams support.
+
+2010-05-10 v0.1.0, v0.1.0+
+  * Made all compression/decompression classes utilize single JS interface.
+  * Source directory re-organization.
+  * Started moving common code for gzip/bzip to separate class.
+  * (v0.1.0+) README updated.
+
+2010-05-10 v0.0.2, v0.0.3
+  * Memory leak fixed.
+  * Bzip library support added.
+
+2010-05-08
+  * Forked from original waveto's implementation.
+

@@ -1,128 +1,33 @@
-node-compress
-=============
+About
+=====
 
-A streaming compression module for node.js.
-Note, that API has changed since v0.1.0 and is compatible with original API by
-waveto no more.
-Since v0.1.1 supports streams API.
+Asynchronous streaming compression module for node.js.
 
-Supports gzip and bzip2 compression/decompression.
+Note, that API has changed since forked from original project by waveto. See
+HISTORY for more details.
+
+Currently library supports two compression backends: gzip and bzip2.
 
 To install, ensure that you have libz and libbz2 installed, and run:
+
+
+Build
+=====
 
 node-waf configure
 node-waf build
 
-This will put the compress-bindings.node binary module in build/default. 
-By default library would be built with gzip support only.
-Use --with-bzip key to configure library with bzip support. 
-Use --no-gzip key to configure library without gzip support.
+Configuration options:
+  --with-gzip         Build with gzip support. Default.
+  --no-gzip           Build w/o gzip support.
+  --with-bzip         Build with bzip support.
+  --no-bzip           Build w/o bzip support. Default.
+
+Build puts the compress-bindings.node binary module in build/default. 
 
 
-Quick example
--------------
+Usage examples
+--------------
 
-var compress=require("../compress-bindings");
-var sys=require("sys");
-var posix=require("fs");
-var Buffer = require('buffer').Buffer;
-
-function createBuffer(str, enc) {
-  enc = enc || 'utf8';
-  var len = Buffer.byteLength(str, enc);
-  var buf = new Buffer(len);
-  buf.write(str, enc, 0);
-  return buf;
-}
-
-
-// Create gzip stream
-var gzip=new compress.Gzip(4);
-
-// Pump data to be compressed
-var gzdata1, gzdata2, gzdata3;
-gzip.write(createBuffer("My data that needs "), function(err, data) {
-  gzdata1 = data;
-});
-sys.puts("Compressed size : "+gzdata1.length);
-
-gzip.write(createBuffer("to be compressed. 01234567890."), function(err, data) {
-  gzdata2 = data;
-}); 
-sys.puts("Compressed size : "+gzdata2.length);
-
-gzip.close(function(err, data) {
-  gzdata3 = data;
-});
-sys.puts("Last bit : "+gzdata3.length);
-
-// Take the output stream, and chop it up into two
-var gzdata = gzdata1+gzdata2+gzdata3;
-sys.puts("Total compressed size : "+gzdata.length);
-var d1 = gzdata.substr(0, 25);
-var d2 = gzdata.substr(25);
-
-// Create gunzip stream to decode these
-var data1, data2, data3;
-var gunzip = new compress.Gunzip;
-gunzip.write(createBuffer(d1, 'binary'), function(err, data) {
-  data1 = data;
-});
-gunzip.write(createBuffer(d2, 'binary'), function(err, data) {
-  data2 = data;
-});
-gunzip.close(function(err, data) {
-  data3 = data;
-});
-
-sys.puts(data1+data2+data3);
-
-
-Quick streams example
----------------------
-
-var compress=require("../compress");
-var sys=require("sys");
-var posix=require("fs");
-var Buffer = require('buffer').Buffer;
-
-sys.puts('Compressing...');
-var gzdata = '';
-var gzip=new compress.GzipStream();
-gzip.setInputEncoding('utf8');
-gzip.setEncoding('binary');
-gzip.addListener('data', function(data) {
-  gzdata += data;
-}).addListener('error', function(err) {
-  throw err;
-}).addListener('end', function() {
-  sys.puts('Compressed length: ' + gzdata.length);
-});
-
-gzip.write("My data that needs ");
-gzip.write("to be compressed. 01234567890.");
-gzip.close();
-sys.puts('Compression finished.');
-
-var d1 = gzdata.substr(0, 25);
-var d2 = gzdata.substr(25);
-
-
-sys.puts('Decompressing...');
-var rawdata = '';
-var gunzip = new compress.GunzipStream();
-gunzip.setInputEncoding('binary');
-gunzip.setEncoding('utf8');
-gunzip.addListener('data', function(data) {
-  rawdata += data;
-}).addListener('error', function(err) {
-  throw err;
-}).addListener('end', function() {
-  sys.puts('Decompressed length: ' + rawdata.length);
-  sys.puts('Raw data: ' + rawdata);
-});
-gunzip.write(d1);
-gunzip.write(d2);
-gunzip.close();
-sys.puts('Decompression finished.');
+See demo/async-test.js.
 
