@@ -1,3 +1,11 @@
+2010-06-20 v0.1.7
+  * Integrated support for npm. Thanks to Tim-Smart.
+  * Cleaned up demos directory.
+  * Fixed issues with events emitter in streaming library.
+
+2010-06-11 v0.1.6
+  * Fixed out of order 'end' events.
+
 2010-06-05 v0.1.5
   * README updated.
   * HISTORY created.
