@@ -1,0 +1,17 @@
+{
+  "name": "compress",
+  "description": "A streaming compression for node.js",
+  "version": "0.1.6",
+  "author": "Ivan Egorov",
+  "repository": {
+    "type": "git",
+    "url": "http://github.com/egorich239/node-compress.git"
+  },
+  "engine": [ "node >=0.1.90" ],
+  "directories": {
+    "lib": "./lib/compress"
+  },
+  "scripts": {
+    "install": "./build.sh"
+  }
+}
