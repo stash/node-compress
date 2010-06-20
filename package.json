@@ -1,7 +1,7 @@
 {
   "name": "compress",
   "description": "A streaming compression for node.js",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "author": "Ivan Egorov",
   "repository": {
     "type": "git",
