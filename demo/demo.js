@@ -1,4 +1,4 @@
-var compress=require("../compress");
+var compress=require("../lib/compress");
 var events=require('events');
 var sys=require("sys");
 var posix=require("fs");
