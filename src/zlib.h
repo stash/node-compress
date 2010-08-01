@@ -435,12 +435,6 @@ class ZipLib : ObjectWrap {
 
 
  private:
-  static Handle<Value> ThrowError(int zipStatus) {
-    assert(Utils::IsError(zipStatus));
-
-    return ThrowException(Utils::GetException(zipStatus));
-  }
- 
   static Handle<Value> ThrowGentleOom() {
     V8::LowMemoryNotification();
     Local<Value> exception = Exception::Error(
