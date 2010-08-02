@@ -1,3 +1,8 @@
+2010-08-02 v0.1.8
+  * nodejs streaming API conformance improved.
+  * Removed some limitations on input/output encoding of data.
+  * Checked to work on node v0.1.102.
+
 2010-06-20 v0.1.7
   * Integrated support for npm. Thanks to Tim-Smart.
   * Cleaned up demos directory.
