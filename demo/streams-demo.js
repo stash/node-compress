@@ -58,6 +58,6 @@ function doDecompress(decompressor, input) {
 }
 
 
-doCompress(new compress.GzipStream(true),
+doCompress(new compress.GzipStream(),
     bind(doDecompress, null, new compress.GunzipStream()));
 
