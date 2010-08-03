@@ -29,5 +29,5 @@ Build puts the compress-bindings.node binary module in build/default.
 Usage examples
 --------------
 
-See demo/async-test.js.
+See demo/demo.js.
 
