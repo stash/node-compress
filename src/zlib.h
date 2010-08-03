@@ -135,16 +135,18 @@ class ZipLib : ObjectWrap {
   {
     HandleScope scope;
 
-    Local<FunctionTemplate> t = FunctionTemplate::New(New);
+    Self::constructor_ = Persistent<FunctionTemplate>::New(
+        FunctionTemplate::New(New));
+    Self::constructor_->InstanceTemplate()->SetInternalFieldCount(1);
 
-    t->Inherit(EventEmitter::constructor_template);
-    t->InstanceTemplate()->SetInternalFieldCount(1);
+    NODE_SET_PROTOTYPE_METHOD(Self::constructor_, "write", Write);
+    NODE_SET_PROTOTYPE_METHOD(Self::constructor_, "close", Close);
+    NODE_SET_PROTOTYPE_METHOD(Self::constructor_, "destroy", Destroy);
 
-    NODE_SET_PROTOTYPE_METHOD(t, "write", Write);
-    NODE_SET_PROTOTYPE_METHOD(t, "close", Close);
-    NODE_SET_PROTOTYPE_METHOD(t, "destroy", Destroy);
+    NODE_SET_METHOD(Self::constructor_, "createInstance_", Create);
 
-    target->Set(String::NewSymbol(Processor::Name), t->GetFunction());
+    target->Set(String::NewSymbol(Processor::Name),
+        Self::constructor_->GetFunction());
   }
 
  public:
@@ -163,6 +165,24 @@ class ZipLib : ObjectWrap {
 
     t.alter(Self::Data);
     return args.This();
+  }
+
+
+  static Handle<Value> Create(const Arguments &args) {
+    HandleScope scope;
+
+    Handle<Value> *params = new(std::nothrow) Handle<Value>[args.Length()];
+    if (params == 0) {
+      return ThrowGentleOom();
+    }
+    for (int i = 0; i < args.Length(); ++i) {
+      params[i] = args[i];
+    }
+
+    Handle<Value> result = Self::constructor_->GetFunction()->
+        NewInstance(args.Length(), params);
+    delete[] params;
+    return result;
   }
 
 
@@ -456,6 +476,7 @@ class ZipLib : ObjectWrap {
   pthread_mutex_t requestsMutex_;
   Queue<Request*> requestsQueue_;
 
+  static Persistent<FunctionTemplate> constructor_;
   static bool callbackInitialized_;
   static pthread_mutex_t callbackMutex_;
   static Queue<Request*> callbackQueue_;
@@ -464,6 +485,7 @@ class ZipLib : ObjectWrap {
   volatile bool processorActive_;
 };
 
+template <class T> Persistent<FunctionTemplate> ZipLib<T>::constructor_;
 template <class T> bool ZipLib<T>::callbackInitialized_ = false;
 template <class T> pthread_mutex_t ZipLib<T>::callbackMutex_;
 template <class T> ev_async ZipLib<T>::callbackNotify_;
