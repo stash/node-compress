@@ -299,7 +299,7 @@ class ZipLib : ObjectWrap {
         pthread_mutex_lock(&callbackMutex_);
         bool success = callbackQueue_.Push(request);
         pthread_mutex_unlock(&callbackMutex_);
-        ev_async_send(&callbackNotify_);
+        ev_async_send(EV_DEFAULT_UC_ &callbackNotify_);
 
         // Unref counter triggered by request.
         ev_unref(EV_DEFAULT_UC);
@@ -381,9 +381,9 @@ class ZipLib : ObjectWrap {
     // Lazy init. Safe to do it here as this always happen in JS-thread.
     if (!callbackInitialized_) {
       pthread_mutex_init(&callbackMutex_, 0);
-      ev_async_init(&callbackNotify_, Self::DoHandleCallbacks2);
-      ev_async_start(&callbackNotify_);
-      ev_unref();
+      ev_async_init(EV_DEFAULT_UC_ &callbackNotify_, Self::DoHandleCallbacks2);
+      ev_async_start(EV_DEFAULT_UC_ &callbackNotify_);
+      ev_unref(EV_DEFAULT_UC);
     }
   }
 
