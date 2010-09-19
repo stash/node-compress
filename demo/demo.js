@@ -47,19 +47,19 @@ var compression = new seq(
     function(state, continuation){
       gzip.write(createBuffer("My data that needs "), function(err, data) {
         sys.puts("Compressed size: " + data.length);
-        continuation(err, state + data);
+        continuation(err, state + data.toString('binary'));
       });
     },
     function(state, continuation){
       gzip.write(createBuffer("to be compressed. 01234567890."), function(err, data) {
         sys.puts("Compressed size: " + data.length);
-        continuation(err, state + data);
+        continuation(err, state + data.toString('binary'));
       }); 
     },
     function(state, continuation){
       gzip.close(function(err, data) {
         sys.puts("Last bit: " + data.length);
-        data = state + data;
+        data = state + data.toString('binary');
         sys.puts("Total compressed size: " + data.length);
         continuation(err, data);
       });
