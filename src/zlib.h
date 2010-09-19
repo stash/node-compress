@@ -59,6 +59,16 @@ class ZipLib : ObjectWrap {
       : kind_(RDestroy), self_(self)
     {}
 
+   public:
+    ~Request() {
+      if (!buffer_.IsEmpty()) {
+        buffer_.Dispose();
+      }
+      if (!callback_.IsEmpty()) {
+        callback_.Dispose();
+      }
+    }
+
     static Buffer *GetBuffer(Local<Value> buffer) {
       return ObjectWrap::Unwrap<Buffer>(buffer->ToObject());
     }

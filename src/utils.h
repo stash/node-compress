@@ -4,17 +4,38 @@
 #include <new>
 
 #include <assert.h>
+#include <stdio.h>
 
 #define COND_RETURN(cond, ret) \
     if (cond) \
       return (ret);
+
+#ifdef DEBUG
+#include <typeinfo>
+template <class T>
+class CounterMonitor {
+  volatile static int Counter;
+
+ public:
+  CounterMonitor() {
+    ++Counter;
+    printf("%s: %d\n", typeid(*this).name(), Counter);
+  }
+
+  ~CounterMonitor() {
+    --Counter;
+  }
+};
+template<class T> volatile int CounterMonitor<T>::Counter = 0;
+#endif
 
 template <class T>
 class ScopedOutputBuffer {
  public:
   ScopedOutputBuffer() 
     : data_(0), capacity_(0), length_(0)
-  {}
+  {
+  }
 
   ScopedOutputBuffer(size_t initialCapacity)
     : data_(0), capacity_(0), length_(0)
