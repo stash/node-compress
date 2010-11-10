@@ -4,11 +4,12 @@ from os.path import exists
 
 srcdir = "."
 blddir = "build"
-VERSION = "0.1.9"
+VERSION = "0.1.10"
 
 def set_options(opt):
   opt.tool_options("compiler_cxx")
 
+  opt.add_option('--debug', dest='debug', action='store_true', default=False)
   opt.add_option('--with-gzip', dest='gzip', action='store_true', default=True)
   opt.add_option('--no-gzip', dest='gzip', action='store_false')
   opt.add_option('--with-bzip', dest='bzip', action='store_true', default=False)
@@ -34,6 +35,13 @@ def configure(conf):
                    mandatory=True)
     conf.env.DEFINES += [ 'WITH_BZIP' ]
     conf.env.USELIB += [ 'BZLIB' ]
+
+  if Options.options.debug:
+    conf.env.DEFINES += [ 'DEBUG' ]
+    conf.env.CXXFLAGS = [ '-O0', '-g3' ]
+  else:
+    conf.env.CXXFLAGS = [ '-O2' ]
+
 
 def build(bld):
   obj = bld.new_task_gen("cxx", "shlib", "node_addon")

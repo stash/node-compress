@@ -1,3 +1,9 @@
+2010-11-10 v0.1.10
+  * Don't emit data events on empty buffer.
+  * Debug build option in wscript.
+  * Minor documentation changes.
+  * Copyright notices.
+
 2010-09-19 v0.1.9
   * Fixed memory leak in Request destructor.
 

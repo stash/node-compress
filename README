@@ -2,22 +2,23 @@ About
 =====
 
 Asynchronous streaming compression module for node.js.
-
 Note, that API has changed since forked from original project by waveto. See
 HISTORY for more details.
-
 Currently library supports two compression backends: gzip and bzip2.
-
-To install, ensure that you have libz and libbz2 installed, and run:
+To install, ensure that you have libz and libbz2 installed.
 
 
 Build
 =====
 
-node-waf configure
-node-waf build
+$ gcc --version
+gcc (Ubuntu 4.4.3-4ubuntu5) 4.4.3
+
+$ node-waf configure
+$ node-waf build
 
 Configuration options:
+  --debug             Build with debug information.
   --with-gzip         Build with gzip support. Default.
   --no-gzip           Build w/o gzip support.
   --with-bzip         Build with bzip support.
@@ -27,7 +28,7 @@ Build puts the compress-bindings.node binary module in build/default.
 
 
 Usage examples
---------------
+==============
 
 See demo/demo.js.
 
