@@ -13,5 +13,6 @@
   },
   "scripts": {
     "install": "./build.sh"
-  }
+  },
+  "main": "lib/compress/index.js"
 }
