@@ -418,10 +418,16 @@ class ZipLib : ObjectWrap {
   static void DoCallback(Persistent<Function> cb, int r, Blob &out) {
     if (!cb.IsEmpty()) {
       HandleScope scope;
+      v8::Local<v8::Object> globalObj = v8::Context::GetCurrent()->Global();
+      v8::Local<v8::Function> bufferConstructor = v8::Local<v8::Function>::Cast(globalObj->Get(v8::String::New("Buffer")));
 
       Local<Value> argv[2];
       argv[0] = Utils::GetException(r);
-      argv[1] = Encode(out.data(), out.length(), BINARY);
+      /* Create a proper binary buffer here */
+      node::Buffer *slowBuffer = node::Buffer::New(out.length());
+      memcpy(node::Buffer::Data(slowBuffer), out.data(), out.length());
+      v8::Handle<v8::Value> constructorArgs[3] = { slowBuffer->handle_, v8::Integer::New(out.length()), v8::Integer::New(0) };
+      argv[1] = bufferConstructor->NewInstance(3, constructorArgs);
 
       TryCatch try_catch;
 
