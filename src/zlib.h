@@ -23,6 +23,7 @@
 #ifndef NODE_COMPRESS_ZLIB_H__
 #define NODE_COMPRESS_ZLIB_H__
 
+#include <iostream>
 // To have (std::nothrow).
 #include <new>
 
@@ -418,17 +419,21 @@ class ZipLib : ObjectWrap {
   static void DoCallback(Persistent<Function> cb, int r, Blob &out) {
     if (!cb.IsEmpty()) {
       HandleScope scope;
-      v8::Local<v8::Object> globalObj = v8::Context::GetCurrent()->Global();
-      v8::Local<v8::Function> bufferConstructor = v8::Local<v8::Function>::Cast(globalObj->Get(v8::String::New("Buffer")));
 
       Local<Value> argv[2];
       argv[0] = Utils::GetException(r);
       /* Create a proper binary buffer here */
-      node::Buffer *slowBuffer = node::Buffer::New(out.length());
-      memcpy(node::Buffer::Data(slowBuffer), out.data(), out.length());
-      v8::Handle<v8::Value> constructorArgs[3] = { slowBuffer->handle_, v8::Integer::New(out.length()), v8::Integer::New(0) };
-      argv[1] = bufferConstructor->NewInstance(3, constructorArgs);
-
+      if(out.getUseBufferOut()) {
+        node::Buffer *slowBuffer = node::Buffer::New(out.length());
+        if(out.length() > 0) memcpy(node::Buffer::Data(slowBuffer), out.data(), out.length());
+        Local<Object> globalObj = Context::GetCurrent()->Global();
+        Local<Function> bufferConstructor = Local<Function>::Cast(globalObj->Get(String::New("Buffer")));
+        Handle<Value> constructorArgs[3] = { slowBuffer->handle_, Integer::New(out.length()), Integer::New(0) };
+        argv[1] = bufferConstructor->NewInstance(3, constructorArgs);
+      }
+      else {
+        argv[1] = Encode(out.data(), out.length(), BINARY);
+      }
       TryCatch try_catch;
 
       cb->Call(Context::GetCurrent()->Global(), 2, argv);

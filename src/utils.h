@@ -115,6 +115,14 @@ class ScopedOutputBuffer {
   size_t avail() const {
     return capacity_ - length_;
   }
+
+  void setUseBufferOut(bool use_buffers) {
+    use_buffers_ = use_buffers;
+  }
+
+  bool getUseBufferOut() {
+    return use_buffers_;
+  }
  
  private:
   bool GrowTo(size_t sz) {
@@ -135,6 +143,7 @@ class ScopedOutputBuffer {
   T* data_;
   size_t capacity_;
   size_t length_;
+  bool use_buffers_;
 
  private:
   ScopedOutputBuffer(ScopedOutputBuffer&);

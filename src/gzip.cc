@@ -126,6 +126,9 @@ class GzipImpl {
     HandleScope scope;
 
     int level = Z_DEFAULT_COMPRESSION;
+    int gzip_header = 16;
+
+    want_buffer_ = false;
     if (args.Length() > 0 && !args[0]->IsUndefined()) {
       if (!args[0]->IsInt32()) {
         Local<Value> exception = Exception::TypeError(
@@ -133,6 +136,24 @@ class GzipImpl {
         return ThrowException(exception);
       }
       level = args[0]->Int32Value();
+
+      if(args.Length() > 1 && !args[1]->IsUndefined()) {
+        if(!args[1]->IsBoolean()) {
+            Local<Value> exception = Exception::TypeError(
+                String::New("want_buffer must be a boolean"));
+            return ThrowException(exception);
+        }
+        if(args[1]->BooleanValue()) want_buffer_ = true;
+
+        if(args.Length() > 2 && !args[2]->IsUndefined()) {
+          if(!args[2]->IsBoolean()) {
+            Local<Value> exception = Exception::TypeError(
+                String::New("gzip_header must be a boolean"));
+            return ThrowException(exception);
+          }
+          if(!args[2]->BooleanValue()) gzip_header = 0;
+        }
+      }
     }
 
     stream_.zalloc = Z_NULL;
@@ -140,7 +161,7 @@ class GzipImpl {
     stream_.opaque = Z_NULL;
 
     int ret = deflateInit2(&stream_, level,
-                           Z_DEFLATED, 16 + MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
+                           Z_DEFLATED, gzip_header + MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
     if (Utils::IsError(ret)) {
       return ThrowException(Utils::GetException(ret));
     }
@@ -149,6 +170,7 @@ class GzipImpl {
 
 
   int Write(char *data, int &dataLength, Blob &out) {
+    out.setUseBufferOut(want_buffer_);
     stream_.next_in = reinterpret_cast<Bytef*>(data);
     stream_.avail_in = dataLength;
     stream_.next_out = out.data() + out.length();
@@ -164,6 +186,7 @@ class GzipImpl {
 
 
   int Finish(Blob &out) {
+    out.setUseBufferOut(want_buffer_);
     stream_.avail_in = 0;
     stream_.next_in = NULL;
     stream_.next_out = out.data() + out.length();
@@ -182,6 +205,7 @@ class GzipImpl {
   }
 
  private:
+  bool want_buffer_;
   z_stream stream_;
 };
 const char GzipImpl::Name[] = "Gzip";
@@ -199,13 +223,32 @@ class GunzipImpl {
 
  private:
   Handle<Value> Init(const Arguments &args) {
+    int gzip_header = 16;
     stream_.zalloc = Z_NULL;
     stream_.zfree = Z_NULL;
     stream_.opaque = Z_NULL;
     stream_.avail_in = 0;
     stream_.next_in = Z_NULL;
 
-    int ret = inflateInit2(&stream_, 16 + MAX_WBITS);
+    want_buffer_ = false;
+    if (args.Length() > 0) {
+      if(!args[0]->IsBoolean()) {
+        Local<Value> exception = Exception::TypeError(
+            String::New("want_buffer must be a boolean"));
+        return ThrowException(exception);
+      }
+      if(args[0]->BooleanValue()) want_buffer_ = true;
+
+      if(args.Length() > 1) {
+        if(!args[1]->IsBoolean()) {
+          Local<Value> exception = Exception::TypeError(
+              String::New("gzip_header must be a boolean"));
+          return ThrowException(exception);
+        }
+        if(!args[1]->BooleanValue()) gzip_header = 0;
+      }
+    }
+    int ret = inflateInit2(&stream_, gzip_header + MAX_WBITS);
     if (Utils::IsError(ret)) {
       return ThrowException(Utils::GetException(ret));
     }
@@ -214,6 +257,7 @@ class GunzipImpl {
 
 
   int Write(char* data, int &dataLength, Blob &out) {
+    out.setUseBufferOut(want_buffer_);
     stream_.next_in = reinterpret_cast<Bytef*>(data);
     stream_.avail_in = dataLength;
     stream_.next_out = out.data() + out.length();
@@ -229,6 +273,7 @@ class GunzipImpl {
 
 
   int Finish(Blob &out) {
+    out.setUseBufferOut(want_buffer_);
     return Z_OK;
   }
 
@@ -238,6 +283,7 @@ class GunzipImpl {
   }
 
  private:
+  bool want_buffer_;
   z_stream stream_;
 };
 const char GunzipImpl::Name[] = "Gunzip";
