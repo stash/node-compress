@@ -27,8 +27,6 @@
 // To have (std::nothrow).
 #include <new>
 
-#include <pthread.h>
-
 #include <node.h>
 #include <node_events.h>
 #include <node_buffer.h>
@@ -36,24 +34,6 @@
 #include <assert.h>
 
 #include "utils.h"
-
-
-#ifdef DEBUG
-
-#include <stdio.h>
-
-#define DEBUG_P(fmt, args...) \
-  do { \
-    fprintf(stderr, "%s: %d %s " fmt "\n", \
-        __FILE__, __LINE__, __PRETTY_FUNCTION__, ##args); \
-  } while (0);
-
-
-#else
-
-#define DEBUG_P(fmt, args...)
-
-#endif
 
 using namespace v8;
 using namespace node;
@@ -126,17 +106,17 @@ class ZipLib : ObjectWrap {
    public:
     static Request* Write(Self *self, Local<Value> inputBuffer,
         Local<Function> callback) {
-      DEBUG_P("WRITE");
+      //DEBUG_P("WRITE");
       return new(std::nothrow) Request(self, inputBuffer, callback);
     }
 
     static Request* Close(Self *self, Local<Function> callback) {
-      DEBUG_P("CLOSE");
+      //DEBUG_P("CLOSE");
       return new(std::nothrow) Request(self, callback);
     }
 
     static Request* Destroy(Self *self) {
-      DEBUG_P("DESTROY");
+      //DEBUG_P("DESTROY");
       return new(std::nothrow) Request(self);
     }
 
@@ -201,6 +181,17 @@ class ZipLib : ObjectWrap {
     Self::constructor_ = Persistent<FunctionTemplate>::New(
         FunctionTemplate::New(New));
     Self::constructor_->InstanceTemplate()->SetInternalFieldCount(1);
+
+    Local<Object> globalObj = Context::GetCurrent()->Global();
+    Local<Object> process = Local<Object>::Cast(globalObj->Get(String::New("process")));
+    Local<Function> binding = Local<Function>::Cast(process->Get(String::New("binding")));
+    Local<Value> binding_arg = String::New("buffer");
+    Local<Object> buffer_obj = Local<Object>::Cast(binding->Call(process,1,&binding_arg));
+    Local<Function> slow_buffer_constructor = Local<Function>::Cast(buffer_obj->Get(String::New("SlowBuffer")));
+    Self::slow_buffer_constructor_ = Persistent<Function>::New(slow_buffer_constructor);
+
+    Local<Function> buffer_constructor = Local<Function>::Cast(globalObj->Get(String::New("Buffer")));
+    Self::buffer_constructor_ = Persistent<Function>::New(buffer_constructor);
 
     NODE_SET_PROTOTYPE_METHOD(Self::constructor_, "write", Write);
     NODE_SET_PROTOTYPE_METHOD(Self::constructor_, "close", Close);
@@ -306,114 +297,70 @@ class ZipLib : ObjectWrap {
       return ThrowGentleOom();
     }
 
-    pthread_mutex_lock(&requestsMutex_);
-    bool pushed = requestsQueue_.Push(request);
-    bool startProcessing = !processorActive_;
-    if (pushed && startProcessing) {
-      processorActive_ = true;
-    }
-    pthread_mutex_unlock(&requestsMutex_);
-    DEBUG_P("PUSH: startProcessing = %d", startProcessing);
-    
-    if (!pushed) {
-      return ThrowGentleOom();
-    }
+    DEBUG_P("Registering [%p]", request);
+    eio_custom(Self::DoProcess, EIO_PRI_DEFAULT,
+               Self::DoHandleCallbacks, request);
 
-    if (startProcessing) {
-      eio_custom(Self::DoProcess, EIO_PRI_DEFAULT,
-          Self::DoHandleCallbacks, request);
-    }
-
-    DEBUG_P("ev_ref()");
+    //DEBUG_P("ev_ref()");
     ev_ref(EV_DEFAULT_UC);
-    DEBUG_P(" ev_ref() done");
+    //DEBUG_P(" ev_ref() done");
 
-    DEBUG_P("Ref()");
+    //DEBUG_P("Ref()");
     Ref();
-    DEBUG_P(" Ref() done");
+    //DEBUG_P(" Ref() done");
     return Undefined();
   }
 
   // Process requests queue.
   // Executed in worker thread.
   static int DoProcess(eio_req *req) {
-    Self *self = reinterpret_cast<Request*>(req->data)->self();
-    self->DoProcess();
+    Request *request = reinterpret_cast<Request*>(req->data);
+    DEBUG_P("Processing [%p]", request);
+    Self *self = request->self();
+    self->DoProcess(request);
     return 0;
   }
 
-  void DoProcess() {
-    Request *request;
+  void DoProcess(Request *request) {
 
-    volatile bool flag;
-    do {
-      while (ReentrantPop(requestsQueue_, requestsMutex_, request)) {
-        DEBUG_P("POP: kind = %d", request->kind());
-        switch (request->kind()) {
-          case Request::RWrite:
-            request->setStatus(
-                this->Write(request->buffer(), request->length(),
-                  request->output()));
-            break;
+    switch (request->kind()) {
+      case Request::RWrite:
+        request->setStatus(
+            this->Write(request->buffer(), request->length(),
+              request->output()));
+        break;
 
-          case Request::RClose:
-            request->setStatus(this->Close(request->output()));
-            break;
+      case Request::RClose:
+        request->setStatus(this->Close(request->output()));
+        break;
 
-          case Request::RDestroy:
-            this->Destroy();
-            request->setStatus(Utils::StatusOk());
-            break;
-        }
-
-        pthread_mutex_lock(&callbackMutex_);
-        bool success = callbackQueue_.Push(request);
-        pthread_mutex_unlock(&callbackMutex_);
-        ev_async_send(EV_DEFAULT_UC_ &callbackNotify_);
-
-        // Unref counter triggered by request.
-        DEBUG_P("ev_unref() ...");
-        ev_unref(EV_DEFAULT_UC);
-        DEBUG_P("  ev_unref() done");
-        if (!success) {
-          // Normally we should unref self() after callback called in
-          // DoHandleCallbacks(), but as we failed to push request for 
-          // callback for this request, we should unref here.
-          DEBUG_P("request->self()->Unref()");
-          request->self()->Unref();
-          DEBUG_P("  request->self()->Unref() done");
-        }
-      }
-
-      pthread_mutex_lock(&requestsMutex_);
-      flag = requestsQueue_.length() != 0;
-      processorActive_ = flag;
-      pthread_mutex_unlock(&requestsMutex_);
-    } while (flag);
+      case Request::RDestroy:
+        this->Destroy();
+        request->setStatus(Utils::StatusOk());
+        break;
+    }
 
   }
 
   // Handle callbacks.
   // Executed in V8 threads.
   static int DoHandleCallbacks(eio_req *req) {
-    Request *request;
-    while (ReentrantPop(callbackQueue_, callbackMutex_, request)) {
-      DEBUG_P("CALLBACK");
+    Request *request = reinterpret_cast<Request*>(req->data);
+    DEBUG_P("Callback [%p]", request);
 
-      Self *self = request->self();
-      self->DoCallback(request->callback(),
-          request->status(), request->output());
+    Self *self = request->self();
+    self->DoCallback(request->callback(),
+                     request->status(), request->output());
 
-      DEBUG_P("self->Unref()");
-      self->Unref();
-      DEBUG_P(" self->Unref() done");
-      delete request;
-    }
+    //DEBUG_P("self->Unref()");
+    self->Unref();
+    //DEBUG_P(" self->Unref() done");
+    delete request;
+    // Unref counter triggered by request.
+    //DEBUG_P("ev_unref() ...");
+    ev_unref(EV_DEFAULT_UC);
+    //DEBUG_P("  ev_unref() done");
     return 0;
-  }
-
-  static void DoHandleCallbacks2(EV_P_ ev_async *evt, int revents) {
-    DoHandleCallbacks(0);
   }
 
   static void DoCallback(Persistent<Function> cb, int r, Blob &out) {
@@ -422,14 +369,20 @@ class ZipLib : ObjectWrap {
 
       Local<Value> argv[2];
       argv[0] = Utils::GetException(r);
+      argv[1] = Local<Value>::New(Undefined());
       /* Create a proper binary buffer here */
       if(out.getUseBufferOut()) {
-        node::Buffer *slowBuffer = node::Buffer::New(out.length());
-        if(out.length() > 0) memcpy(node::Buffer::Data(slowBuffer), out.data(), out.length());
-        Local<Object> globalObj = Context::GetCurrent()->Global();
-        Local<Function> bufferConstructor = Local<Function>::Cast(globalObj->Get(String::New("Buffer")));
-        Handle<Value> constructorArgs[3] = { slowBuffer->handle_, Integer::New(out.length()), Integer::New(0) };
-        argv[1] = bufferConstructor->NewInstance(3, constructorArgs);
+        Local<Value> arg = Integer::NewFromUnsigned(out.length());
+        Local<Object> buffer = Self::slow_buffer_constructor_->NewInstance(1, &arg);
+        if(!buffer.IsEmpty())  {
+          Buffer *slowBuffer = ObjectWrap::Unwrap<Buffer>(buffer);
+          if(out.length() > 0) memcpy(node::Buffer::Data(slowBuffer), out.data(), out.length());
+          Handle<Value> constructorArgs[3];
+          constructorArgs[0] = slowBuffer->handle_;
+          constructorArgs[1] = Integer::New(out.length());
+          constructorArgs[2] = Integer::New(0);
+          argv[1] = Self::buffer_constructor_->NewInstance(3, constructorArgs);
+        }
       }
       else {
         argv[1] = Encode(out.data(), out.length(), BINARY);
@@ -445,34 +398,10 @@ class ZipLib : ObjectWrap {
   }
 
  private:
-  static bool ReentrantPop(Queue<Request*> &queue, pthread_mutex_t &mutex,
-      Request*& request) {
-    request = 0;
-
-    pthread_mutex_lock(&mutex);
-    bool result = queue.length() != 0;
-    if (result) {
-      request = queue.Pop();
-    }
-    pthread_mutex_unlock(&mutex);
-
-    return result;
-  }
-
- private:
 
   ZipLib()
-    : ObjectWrap(), state_(Self::Idle), processorActive_(false)
+    : ObjectWrap(), state_(Self::Idle)
   {
-    pthread_mutex_init(&requestsMutex_, 0);
-
-    // Lazy init. Safe to do it here as this always happen in JS-thread.
-    if (!callbackInitialized_) {
-      pthread_mutex_init(&callbackMutex_, 0);
-      ev_async_init(EV_DEFAULT_UC_ &callbackNotify_, Self::DoHandleCallbacks2);
-      ev_async_start(EV_DEFAULT_UC_ &callbackNotify_);
-      ev_unref(EV_DEFAULT_UC);
-    }
   }
 
 
@@ -527,14 +456,13 @@ class ZipLib : ObjectWrap {
     state_ = Self::Destroyed;
   }
 
-
   int Finish(Blob &out) {
     const int Chunk = 128;
 
     int ret;
     do {
       COND_RETURN(!out.GrowBy(Chunk), Utils::StatusMemoryError());
-      
+
       ret = this->processor_.Finish(out);
       COND_RETURN(Utils::IsError(ret), ret);
     } while (ret != Utils::StatusEndOfStream());
@@ -561,25 +489,14 @@ class ZipLib : ObjectWrap {
   Processor processor_;
   State state_;
 
-  pthread_mutex_t requestsMutex_;
-  Queue<Request*> requestsQueue_;
-
   static Persistent<FunctionTemplate> constructor_;
-  static bool callbackInitialized_;
-  static pthread_mutex_t callbackMutex_;
-  static Queue<Request*> callbackQueue_;
-  static ev_async callbackNotify_;
-
-  volatile bool processorActive_;
+  static Persistent<Function> buffer_constructor_;
+  static Persistent<Function> slow_buffer_constructor_;
 };
 
 template <class T> Persistent<FunctionTemplate> ZipLib<T>::constructor_;
-template <class T> bool ZipLib<T>::callbackInitialized_ = false;
-template <class T> pthread_mutex_t ZipLib<T>::callbackMutex_;
-template <class T> ev_async ZipLib<T>::callbackNotify_;
-
-template <class T>
-Queue<typename ZipLib<T>::Request*> ZipLib<T>::callbackQueue_;
+template <class T> Persistent<Function> ZipLib<T>::buffer_constructor_;
+template <class T> Persistent<Function> ZipLib<T>::slow_buffer_constructor_;
 
 #endif
 
