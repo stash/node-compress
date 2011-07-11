@@ -182,17 +182,6 @@ class ZipLib : ObjectWrap {
         FunctionTemplate::New(New));
     Self::constructor_->InstanceTemplate()->SetInternalFieldCount(1);
 
-    Local<Object> globalObj = Context::GetCurrent()->Global();
-    Local<Object> process = Local<Object>::Cast(globalObj->Get(String::New("process")));
-    Local<Function> binding = Local<Function>::Cast(process->Get(String::New("binding")));
-    Local<Value> binding_arg = String::New("buffer");
-    Local<Object> buffer_obj = Local<Object>::Cast(binding->Call(process,1,&binding_arg));
-    Local<Function> slow_buffer_constructor = Local<Function>::Cast(buffer_obj->Get(String::New("SlowBuffer")));
-    Self::slow_buffer_constructor_ = Persistent<Function>::New(slow_buffer_constructor);
-
-    Local<Function> buffer_constructor = Local<Function>::Cast(globalObj->Get(String::New("Buffer")));
-    Self::buffer_constructor_ = Persistent<Function>::New(buffer_constructor);
-
     NODE_SET_PROTOTYPE_METHOD(Self::constructor_, "write", Write);
     NODE_SET_PROTOTYPE_METHOD(Self::constructor_, "close", Close);
     NODE_SET_PROTOTYPE_METHOD(Self::constructor_, "destroy", Destroy);
@@ -372,17 +361,17 @@ class ZipLib : ObjectWrap {
       argv[1] = Local<Value>::New(Undefined());
       /* Create a proper binary buffer here */
       if(out.getUseBufferOut()) {
-        Local<Value> arg = Integer::NewFromUnsigned(out.length());
-        Local<Object> buffer = Self::slow_buffer_constructor_->NewInstance(1, &arg);
-        if(!buffer.IsEmpty())  {
-          Buffer *slowBuffer = ObjectWrap::Unwrap<Buffer>(buffer);
-          if(out.length() > 0) memcpy(node::Buffer::Data(slowBuffer), out.data(), out.length());
-          Handle<Value> constructorArgs[3];
-          constructorArgs[0] = slowBuffer->handle_;
-          constructorArgs[1] = Integer::New(out.length());
-          constructorArgs[2] = Integer::New(0);
-          argv[1] = Self::buffer_constructor_->NewInstance(3, constructorArgs);
-        }
+        Buffer *slowBuffer = Buffer::New(out.length());
+        if(out.length() > 0) memcpy(node::Buffer::Data(slowBuffer), out.data(), out.length());
+
+        Local<Object> globalObj = Context::GetCurrent()->Global();
+        Local<Function> buffer_constructor = Local<Function>::Cast(globalObj->Get(String::New("Buffer")));
+
+        Handle<Value> constructorArgs[3];
+        constructorArgs[0] = slowBuffer->handle_;
+        constructorArgs[1] = Integer::New(out.length());
+        constructorArgs[2] = Integer::New(0);
+        argv[1] = buffer_constructor->NewInstance(3, constructorArgs);
       }
       else {
         argv[1] = Encode(out.data(), out.length(), BINARY);
@@ -490,13 +479,9 @@ class ZipLib : ObjectWrap {
   State state_;
 
   static Persistent<FunctionTemplate> constructor_;
-  static Persistent<Function> buffer_constructor_;
-  static Persistent<Function> slow_buffer_constructor_;
 };
 
 template <class T> Persistent<FunctionTemplate> ZipLib<T>::constructor_;
-template <class T> Persistent<Function> ZipLib<T>::buffer_constructor_;
-template <class T> Persistent<Function> ZipLib<T>::slow_buffer_constructor_;
 
 #endif
 
