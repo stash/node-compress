@@ -169,14 +169,14 @@ class GzipImpl {
   }
 
 
-  int Write(char *data, int &dataLength, Blob &out) {
+  int Write(char *data, int &dataLength, Blob &out, bool flush) {
     out.setUseBufferOut(want_buffer_);
     stream_.next_in = reinterpret_cast<Bytef*>(data);
     stream_.avail_in = dataLength;
     stream_.next_out = out.data() + out.length();
     size_t initAvail = stream_.avail_out = out.avail();
 
-    int ret = deflate(&stream_, Z_NO_FLUSH);
+    int ret = deflate(&stream_, flush ? Z_FINISH : Z_NO_FLUSH);
     dataLength = stream_.avail_in;
     if (!Utils::IsError(ret)) {
       out.IncreaseLengthBy(initAvail - stream_.avail_out);
@@ -256,14 +256,14 @@ class GunzipImpl {
   }
 
 
-  int Write(char* data, int &dataLength, Blob &out) {
+  int Write(char* data, int &dataLength, Blob &out, bool flush) {
     out.setUseBufferOut(want_buffer_);
     stream_.next_in = reinterpret_cast<Bytef*>(data);
     stream_.avail_in = dataLength;
     stream_.next_out = out.data() + out.length();
     size_t initAvail = stream_.avail_out = out.avail();
 
-    int ret = inflate(&stream_, Z_NO_FLUSH);
+    int ret = inflate(&stream_, Z_NO_FLUSH); // flush means nothing here.
     dataLength = stream_.avail_in;
     if (!Utils::IsError(ret)) {
       out.IncreaseLengthBy(initAvail - stream_.avail_out);

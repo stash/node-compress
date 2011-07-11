@@ -64,7 +64,7 @@ class ZipLib : ObjectWrap {
       RDestroy
     };
    private:
-    Request(ZipLib *self, Local<Value> inputBuffer, Local<Function> callback)
+    Request(ZipLib *self, Local<Value> inputBuffer, Local<Function> callback, bool flush)
       : kind_(RWrite), self_(self),
       buffer_(Persistent<Value>::New(inputBuffer)),
 #if NODE_VERSION_AT_LEAST(0,3,0)
@@ -74,6 +74,7 @@ class ZipLib : ObjectWrap {
       data_(GetBuffer(inputBuffer)->data()),
       length_(GetBuffer(inputBuffer)->length()),
 #endif
+      flush_(flush),
       callback_(Persistent<Function>::New(callback))
     {}
     
@@ -105,9 +106,9 @@ class ZipLib : ObjectWrap {
 
    public:
     static Request* Write(Self *self, Local<Value> inputBuffer,
-        Local<Function> callback) {
+        Local<Function> callback, bool flush) {
       //DEBUG_P("WRITE");
-      return new(std::nothrow) Request(self, inputBuffer, callback);
+      return new(std::nothrow) Request(self, inputBuffer, callback, flush);
     }
 
     static Request* Close(Self *self, Local<Function> callback) {
@@ -131,6 +132,10 @@ class ZipLib : ObjectWrap {
 
     int length() const {
       return length_;
+    }
+
+    bool flush() const {
+      return flush_;
     }
 
     Self *self() const {
@@ -165,6 +170,7 @@ class ZipLib : ObjectWrap {
     Persistent<Value> buffer_;
     char *data_;
     int length_;
+    bool flush_;
 
     Persistent<Function> callback_;
 
@@ -242,6 +248,7 @@ class ZipLib : ObjectWrap {
 
   static Handle<Value> Write(const Arguments& args) {
     HandleScope scope;
+    bool flush = false;
 
     if (!Buffer::HasInstance(args[0])) {
       Local<Value> exception = Exception::TypeError(
@@ -250,15 +257,19 @@ class ZipLib : ObjectWrap {
     }
 
     Local<Function> cb;
-    if (args.Length() > 1 && !args[1]->IsUndefined()) {
-      if (!args[1]->IsFunction()) {
+    if (args.Length() > 1 && !args[args.Length()-1]->IsUndefined()) {
+      if (!args[args.Length()-1]->IsFunction()) {
         return ThrowCallbackExpected();
       }
-      cb = Local<Function>::Cast(args[1]);
+      cb = Local<Function>::Cast(args[args.Length()-1]);
+
+      if(args.Length() > 2 && !args[1]->IsUndefined()) {
+        if(args[1]->BooleanValue()) flush = true;
+      }
     }
 
     Self *self = ObjectWrap::Unwrap<Self>(args.This());
-    Request *request = Request::Write(self, args[0], cb);
+    Request *request = Request::Write(self, args[0], cb, flush);
     return self->PushRequest(request);
   }
 
@@ -297,7 +308,7 @@ class ZipLib : ObjectWrap {
       return ThrowGentleOom();
     }
 
-    DEBUG_P("Registering [%p]", request);
+    //DEBUG_P("Registering [%p]", request);
     eio_custom(Self::DoProcess, EIO_PRI_DEFAULT,
                Self::DoHandleCallbacks, request);
 
@@ -315,7 +326,7 @@ class ZipLib : ObjectWrap {
   // Executed in worker thread.
   static int DoProcess(eio_req *req) {
     Request *request = reinterpret_cast<Request*>(req->data);
-    DEBUG_P("Processing [%p]", request);
+    //DEBUG_P("Processing [%p]", request);
     Self *self = request->self();
     self->DoProcess(request);
     return 0;
@@ -327,7 +338,7 @@ class ZipLib : ObjectWrap {
       case Request::RWrite:
         request->setStatus(
             this->Write(request->buffer(), request->length(),
-              request->output()));
+              request->output(), request->flush()));
         break;
 
       case Request::RClose:
@@ -346,11 +357,15 @@ class ZipLib : ObjectWrap {
   // Executed in V8 threads.
   static int DoHandleCallbacks(eio_req *req) {
     Request *request = reinterpret_cast<Request*>(req->data);
-    DEBUG_P("Callback [%p]", request);
+    //DEBUG_P("Callback [%p]", request);
 
     Self *self = request->self();
     self->DoCallback(request->callback(),
                      request->status(), request->output());
+
+    if(request->flush()) {
+      self->Destroy();
+    }
 
     //DEBUG_P("self->Unref()");
     self->Unref();
@@ -406,11 +421,14 @@ class ZipLib : ObjectWrap {
 
 
   ~ZipLib() {
+#ifdef DEBUG
+    DEBUG_P("destroy [%d]", ++Self::destroy_count_);
+#endif
     this->Destroy();
   }
 
 
-  int Write(char *data, int dataLength, Blob &out) {
+  int Write(char *data, int dataLength, Blob &out, bool flush) {
     COND_RETURN(state_ != Self::Data, Utils::StatusSequenceError());
 
     Transition t(state_, Self::Error);
@@ -420,7 +438,9 @@ class ZipLib : ObjectWrap {
     while (dataLength > 0) { 
       COND_RETURN(!out.GrowBy(dataLength + 1), Utils::StatusMemoryError());
       
-      ret = this->processor_.Write(data - dataLength, dataLength, out);
+      ret = this->processor_.Write(data - dataLength, dataLength, out, flush);
+      if(flush) Finish(out);
+
       COND_RETURN(Utils::IsError(ret), ret);
       if (ret == Utils::StatusEndOfStream()) {
         t.alter(Self::Eos);
@@ -428,6 +448,10 @@ class ZipLib : ObjectWrap {
       }
     }
     t.abort();
+    if(flush) {
+      Finish(out);
+      this->Destroy();
+    }
     return Utils::StatusOk();
   }
 
@@ -492,11 +516,17 @@ class ZipLib : ObjectWrap {
   static Persistent<FunctionTemplate> constructor_;
   static Persistent<Function> buffer_constructor_;
   static Persistent<Function> slow_buffer_constructor_;
+#ifdef DEBUG
+  static int destroy_count_;
+#endif
 };
 
 template <class T> Persistent<FunctionTemplate> ZipLib<T>::constructor_;
 template <class T> Persistent<Function> ZipLib<T>::buffer_constructor_;
 template <class T> Persistent<Function> ZipLib<T>::slow_buffer_constructor_;
+#ifdef DEBUG
+template <class T> int ZipLib<T>::destroy_count_ = 0;
+#endif
 
 #endif
 
