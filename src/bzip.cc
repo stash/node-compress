@@ -137,6 +137,7 @@ class BzipImpl {
 
     int blockSize100k = 1;
     int workFactor = 0;
+    want_buffer_ = false;
 
     int length = args.Length();
     if (length >= 1 && !args[0]->IsUndefined()) {
@@ -155,6 +156,9 @@ class BzipImpl {
       }
       workFactor = args[1]->Int32Value();
     }
+    if (args.Length() > 3 && !args[2]->IsUndefined()) {
+      want_buffer_ = args[2]->BooleanValue() ? true : false;
+    }
 
     /* allocate deflate state */
     stream_.bzalloc = NULL;
@@ -169,13 +173,14 @@ class BzipImpl {
   }
 
 
-  int Write(char *data, int &dataLength, Blob &out) {
+  int Write(char *data, int &dataLength, Blob &out, bool flush) {
+    out.setUseBufferOut(want_buffer_);
     stream_.next_in = data;
     stream_.avail_in = dataLength;
     stream_.next_out = out.data() + out.length();
     size_t initAvail = stream_.avail_out = out.avail();
 
-    int ret = BZ2_bzCompress(&stream_, BZ_RUN);
+    int ret = BZ2_bzCompress(&stream_, flush ? BZ_FINISH : BZ_RUN);
     dataLength = stream_.avail_in;
     if (!Utils::IsError(ret)) {
       out.IncreaseLengthBy(initAvail - stream_.avail_out);
@@ -185,6 +190,7 @@ class BzipImpl {
 
 
   int Finish(Blob &out) {
+    out.setUseBufferOut(want_buffer_);
     stream_.next_out = out.data() + out.length();
     size_t initAvail = stream_.avail_out = out.avail();
 
@@ -201,8 +207,9 @@ class BzipImpl {
   }
 
 
- protected:
+ private:
   bz_stream stream_;
+  bool want_buffer_;
 };
 const char BzipImpl::Name[] = "Bzip";
 typedef ZipLib<BzipImpl> Bzip;
@@ -221,9 +228,14 @@ class BunzipImpl {
   Handle<Value> Init(const Arguments &args) {
     HandleScope scope;
 
+    want_buffer_ = false;
+
     int small = 0;
     if (args.Length() > 0 && !args[0]->IsUndefined()) {
       small = args[0]->BooleanValue() ? 1 : 0;
+    }
+    if (args.Length() > 1 && !args[1]->IsUndefined()) {
+      want_buffer_ = args[1]->BooleanValue() ? true : false;
     }
 
     stream_.bzalloc = NULL;
@@ -240,7 +252,8 @@ class BunzipImpl {
   }
 
 
-  int Write(const char *data, int &dataLength, Blob &out) {
+  int Write(const char *data, int &dataLength, Blob &out, bool flush) {
+    out.setUseBufferOut(want_buffer_);
     stream_.next_in = const_cast<char*>(data);
     stream_.avail_in = dataLength;
     stream_.next_out = out.data() + out.length();
@@ -256,6 +269,7 @@ class BunzipImpl {
 
 
   int Finish(Blob &out) {
+    out.setUseBufferOut(want_buffer_);
     return BZ_OK;
   }
 
@@ -265,6 +279,7 @@ class BunzipImpl {
   }
 
  private:
+  bool want_buffer_;
   bz_stream stream_;
 };
 const char BunzipImpl::Name[] = "Bunzip";

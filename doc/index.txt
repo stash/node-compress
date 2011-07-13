@@ -55,10 +55,15 @@ Gunzip(use_buffers, comp_headers)
   use_buffers: true/[false] if the callbacks should receive buffers.
   comp_headers: [true]/false if the compressor should expect headers.
 
-Bzip(blockSize, workFactor)
+Bzip(blockSize, workFactor, use_buffers, comp_headers)
   See bzip library documentation for details.
+  use_buffers: true/[false] if the callbacks should receive buffers.
+  comp_headers: [true]/false if the compressor should expect headers.
 
-Bunzip()
+Bunzip(small, use_buffers, comp_headers)
+  See bzip library documentation for details.
+  use_buffers: true/[false] if the callbacks should receive buffers.
+  comp_headers: [true]/false if the compressor should expect headers.
 
 
 Streams API
