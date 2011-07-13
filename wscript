@@ -58,3 +58,11 @@ def build(bld):
   obj.defines = bld.env.DEFINES
   obj.uselib = bld.env.USELIB
 
+
+def shutdown():
+  if Options.commands['clean']:
+      if exists(dest):
+          unlink(dest)
+  else:
+      if exists(built):
+          copy(built, dest)
