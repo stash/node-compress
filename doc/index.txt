@@ -7,10 +7,10 @@ Callback API
 Several classes are contained in the package: Gzip, Gunzip, Bzip, Bunzip.
 They have pretty strict limitations on data input/output format, share same
 interface and use callbacks.
-All callbacks have following call convention: callback(exc, binary_string).
+All callbacks have following call convention: callback(exc, output).
 Here:
   exc is exception if any occured while processing request;
-  binary_string is binary-encoded output.
+  output is either a binary-encoded string or a NodeJS Buffer instance.
 Those functions having input always obtain NodeJS Buffer instance.
 
 All (de)compressor object might be used for processing exactly one
@@ -24,10 +24,10 @@ automatically when (de)compressor object is garbage collected.
 Library methods throw exceptions in several cases. This is done intentionally as
 usually means programming error.
 
-1. write(buffer[, opt_callback])
+1. write(buffer [, opt_close] [, opt_callback])
   Push buffer to input stream. Asynchronously call opt_callback for output if
-  any specified. Callback is warranted to be called at at least next NodeJS
-  tick.
+  any specified. If opt_close is true, the compressor is flushed and the
+  output usable (avoids an explicit call to close).
 
   Exceptions:
     TypeError if buffer is not of type Buffer, or callback is not a function.
@@ -41,14 +41,19 @@ usually means programming error.
     TypeError if callback is not a function.
 
 3. destroy()
-  Avoid finalizing stream and clean internal structures.
+  Avoid finalizing stream and clean internal structures. Also happens
+  when the compressor leaves scope and is garbage collected by v8.
 
 Callback API constructors
 -------------------------
-Gzip(compressionLevel)
-  1 <= compressionLevel <= 9
+Gzip(compressionLevel, use_buffers, comp_headers)
+  compressionLevel: 1 <= compressionLevel <= 9
+  use_buffers: true/[false] if the callbacks should receive buffers.
+  comp_headers: [true]/false if the compressor should write headers.
 
-Gunzip()
+Gunzip(use_buffers, comp_headers)
+  use_buffers: true/[false] if the callbacks should receive buffers.
+  comp_headers: [true]/false if the compressor should expect headers.
 
 Bzip(blockSize, workFactor)
   See bzip library documentation for details.
