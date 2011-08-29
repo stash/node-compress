@@ -19,7 +19,7 @@ def set_options(opt):
   opt.add_option('--debug', dest='debug', action='store_true', default=False)
   opt.add_option('--with-gzip', dest='gzip', action='store_true', default=True)
   opt.add_option('--no-gzip', dest='gzip', action='store_false')
-  opt.add_option('--with-bzip', dest='bzip', action='store_true', default=False)
+  opt.add_option('--with-bzip', dest='bzip', action='store_true', default=True)
   opt.add_option('--no-bzip', dest='bzip', action='store_false')
 
 def configure(conf):
