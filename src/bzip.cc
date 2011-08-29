@@ -123,6 +123,9 @@ const char BzipUtils::OutbuffFull[] = "Output buffer full.";
 
 
 class BzipImpl {
+#ifdef NEED_PUBLIC_FRIEND
+ public:
+#endif
   friend class ZipLib<BzipImpl>;
 
   typedef BzipUtils Utils;
@@ -216,6 +219,9 @@ typedef ZipLib<BzipImpl> Bzip;
 
 
 class BunzipImpl {
+#ifdef NEED_PUBLIC_FRIEND
+ public:
+#endif
   friend class ZipLib<BunzipImpl>;
 
   typedef BzipUtils Utils;

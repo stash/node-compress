@@ -113,6 +113,9 @@ const char GzipUtils::VersionError[] = "Z_VERSION_ERROR: "
 
 
 class GzipImpl {
+#ifdef NEED_PUBLIC_FRIEND
+ public:
+#endif
   friend class ZipLib<GzipImpl>;
 
   typedef GzipUtils Utils;
@@ -213,6 +216,9 @@ typedef ZipLib<GzipImpl> Gzip;
 
 
 class GunzipImpl {
+#ifdef NEED_PUBLIC_FRIEND
+ public:
+#endif
   friend class ZipLib<GunzipImpl>;
 
   typedef GzipUtils Utils;

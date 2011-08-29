@@ -29,6 +29,10 @@
 #include <stdio.h>
 #include <pthread.h>
 
+#if defined(__GNUC_VERSION) && __GNUC_VERSION >= 30400 && __GNUC_VERSION < 30500
+# define NEED_PUBLIC_FRIEND 1
+#endif
+
 #define COND_RETURN(cond, ret) \
     if (cond) \
       return (ret);
