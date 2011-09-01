@@ -162,7 +162,7 @@ class GzipImpl {
     stream_.zalloc = Z_NULL;
     stream_.zfree = Z_NULL;
     stream_.opaque = Z_NULL;
-
+    DEBUG_P("strm:%p", (void*)&stream_);
     int ret = deflateInit2(&stream_, level,
                            Z_DEFLATED, gzip_header + MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
     if (Utils::IsError(ret)) {
@@ -179,9 +179,13 @@ class GzipImpl {
     stream_.next_out = out.data() + out.length();
     size_t initAvail = stream_.avail_out = out.avail();
 
+    DEBUG_P("deflate strm:%p flush?%s stream{next_in:%p avail_in:%d next_out:%p avail_out:%d} out{length():%d capacity():%d}", (void*)&stream_, flush?"yes":"no", stream_.next_in, stream_.avail_in, stream_.next_out, stream_.avail_out, out.length(), out.capacity());
     int ret = deflate(&stream_, flush ? Z_FINISH : Z_NO_FLUSH);
-    dataLength = stream_.avail_in;
+    DEBUG_P("post-deflate strm:%p flush?%s stream{next_in:%p avail_in:%d next_out:%p avail_out:%d} wrote:%d ret:%d out{length():%d capacity():%d}", (void*)&stream_, flush?"yes":"no", stream_.next_in, stream_.avail_in, stream_.next_out, stream_.avail_out, initAvail - stream_.avail_out, ret, out.length(), out.capacity());
+
     if (!Utils::IsError(ret)) {
+      DEBUG_P("post-deflate strm:%p ret is OK will assert %d+%d <= %d", (void*)&stream_, out.length(), initAvail - stream_.avail_out, out.capacity());
+      dataLength = stream_.avail_in;
       out.IncreaseLengthBy(initAvail - stream_.avail_out);
     }
     return ret;
@@ -195,7 +199,9 @@ class GzipImpl {
     stream_.next_out = out.data() + out.length();
     int initAvail = stream_.avail_out = out.avail();
 
+    DEBUG_P("deflate strm:%p stream{next_in:%p avail_in:%d next_out:%p avail_out:%d} out{length():%d capacity():%d}", (void*)&stream_, stream_.next_in, stream_.avail_in, stream_.next_out, stream_.avail_out, out.length(), out.capacity());
     int ret = deflate(&stream_, Z_FINISH);
+    DEBUG_P("post-deflate strm:%p stream{next_in:%p avail_in:%d next_out:%p avail_out:%d} wrote:%d ret:%d out{length():%d capacity():%d}", (void*)&stream_, stream_.next_in, stream_.avail_in, stream_.next_out, stream_.avail_out, initAvail - stream_.avail_out, ret, out.length(), out.capacity());
     if (!Utils::IsError(ret)) {
       out.IncreaseLengthBy(initAvail - stream_.avail_out);
     }

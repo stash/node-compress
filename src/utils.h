@@ -44,8 +44,8 @@
 #define DEBUG_P(fmt, args...) \
 do { \
   char junk[1024]; \
-  snprintf(junk, sizeof(junk), "%s: %d %s " fmt "\n", \
-      __FILE__, __LINE__, __PRETTY_FUNCTION__, ##args); \
+  snprintf(junk, sizeof(junk), "((%d)) %s: %d %s " fmt "\n", \
+      pthread_self(), __FILE__, __LINE__, __PRETTY_FUNCTION__, ##args); \
   write(2, junk, strlen(junk)); \
 } while (0);
 
@@ -115,7 +115,8 @@ class ScopedOutputBuffer {
 
 
   void Free() {
-    free(data_);
+    //DEBUG_P("FREE %p, size %d", (void*)data_, capacity_);
+    if (data_) free(data_);
     data_ = 0;
     capacity_ = 0;
     length_ = 0;
@@ -156,6 +157,7 @@ class ScopedOutputBuffer {
     }
 
     T *tmp = (T*) realloc(data_, sz * sizeof(T));
+    //DEBUG_P("REALLOC %p to %p, size %d to %d", (void*)data_, (void*)tmp, capacity_, sz*sizeof(T));
     if (tmp == NULL) {
       return false;
     }

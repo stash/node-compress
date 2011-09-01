@@ -65,7 +65,7 @@ class ZipLib : ObjectWrap {
     };
    private:
     Request(ZipLib *self, Local<Value> inputBuffer, Local<Function> callback, bool flush)
-      : kind_(RWrite), self_(self),
+      : kind_(RWrite), self_(self), next_(0),
       buffer_(Persistent<Value>::New(inputBuffer)),
 #if NODE_VERSION_AT_LEAST(0,3,0)
       data_(Buffer::Data(inputBuffer->ToObject())),
@@ -79,12 +79,12 @@ class ZipLib : ObjectWrap {
     {}
     
     Request(ZipLib *self, Local<Function> callback)
-      : kind_(RClose), self_(self),
+      : kind_(RClose), self_(self), next_(0),
       callback_(Persistent<Function>::New(callback))
     {}
 
     Request(ZipLib *self)
-      : kind_(RDestroy), self_(self)
+      : kind_(RDestroy), self_(self), next_(0)
     {}
 
    public:
@@ -159,10 +159,19 @@ class ZipLib : ObjectWrap {
       return callback_;
     }
 
+    Request *next () {
+      return next_;
+    }
+    void setNext (Request *next) {
+      next_ = next;
+    }
+
    private:
     Kind kind_;
 
     ZipLib *self_;
+
+    Request *next_;
 
     // We store persistent Buffer object reference to avoid garbage collection,
     // but it's not thread-safe to reference it from non-JS script, so we also
@@ -177,6 +186,7 @@ class ZipLib : ObjectWrap {
     // Output structures.
     Blob out_;
     int status_;
+
   };
 
  public:
@@ -217,6 +227,8 @@ class ZipLib : ObjectWrap {
     }
     result->Wrap(args.This());
 
+    result->tail_req_ = (Request*)0;
+    DEBUG_P("tail_req_:%p",result->tail_req_);
     Transition t(result->state_, Self::Error);
     Handle<Value> exception = result->processor_.Init(args);
     if (!exception->IsUndefined()) {
@@ -301,24 +313,32 @@ class ZipLib : ObjectWrap {
 
 
  private:
-  // Attempt to push request.
+  void SchedRequest (Request *request) {
+    DEBUG_P("%p Scheduling [%p,%d]", this, request, request->kind());
+    eio_custom(Self::DoProcess, EIO_PRI_DEFAULT,
+               Self::DoHandleCallbacks, request);
+    ev_ref(EV_DEFAULT_UC);
+    Ref();
+  }
+
+  // Attempt to push request.  If we can't schedule it immediately, add it to
+  // a tail-queue so two worker threads aren't working on the same zstream
+  // simultaneously.
   // Executed in V8 thread.
   Handle<Value> PushRequest(Request *request) {
     if (request == 0) {
       return ThrowGentleOom();
     }
 
-    //DEBUG_P("Registering [%p]", request);
-    eio_custom(Self::DoProcess, EIO_PRI_DEFAULT,
-               Self::DoHandleCallbacks, request);
-
-    //DEBUG_P("ev_ref()");
-    ev_ref(EV_DEFAULT_UC);
-    //DEBUG_P(" ev_ref() done");
-
-    //DEBUG_P("Ref()");
-    Ref();
-    //DEBUG_P(" Ref() done");
+    if (tail_req_) {
+      DEBUG_P("%p Delaying Request [%p,%d]", this, request, request->kind());
+      tail_req_->setNext(request);
+    } else {
+      //DEBUG_P("%p Immediate Request [%p,%d]", this, request,request->kind());
+      this->SchedRequest(request);
+    }
+    tail_req_ = request;
+    DEBUG_P("%p tail_req_:%p", this, this->tail_req_);
     return Undefined();
   }
 
@@ -326,14 +346,13 @@ class ZipLib : ObjectWrap {
   // Executed in worker thread.
   static int DoProcess(eio_req *req) {
     Request *request = reinterpret_cast<Request*>(req->data);
-    //DEBUG_P("Processing [%p]", request);
     Self *self = request->self();
     self->DoProcess(request);
     return 0;
   }
 
   void DoProcess(Request *request) {
-
+    DEBUG_P("%p Processing [%p]", this, request);
     switch (request->kind()) {
       case Request::RWrite:
         request->setStatus(
@@ -353,28 +372,40 @@ class ZipLib : ObjectWrap {
 
   }
 
-  // Handle callbacks.
+  // Handle callbacks, potentially scheduling another Request from the tail-queue.
   // Executed in V8 threads.
   static int DoHandleCallbacks(eio_req *req) {
     Request *request = reinterpret_cast<Request*>(req->data);
-    //DEBUG_P("Callback [%p]", request);
 
     Self *self = request->self();
+    DEBUG_P("%p Callback [%p]", self, request);
     self->DoCallback(request->callback(),
                      request->status(), request->output());
 
+    // do this *after* the callback since the CB *could have* scheduled another request
+    Request *next = request->next();
+
     if(request->flush()) {
+      DEBUG_P("%p Destroy via Callback, KILL next:[%p,%d]", self, next, next?next->kind():-1);
       self->Destroy();
     }
 
-    //DEBUG_P("self->Unref()");
+    if (next) {
+      assert(!request->flush());
+      DEBUG_P("%p Found pending Request next:[%p,%d]", self, next, next->kind());
+      self->SchedRequest(next);
+    } else {
+      assert(self->tail_req_ == request);
+      DEBUG_P("%p No pending Requests", self);
+      self->tail_req_ = 0;
+    }
+
+    // unref/free should happen *after* we schedule next (if present)
     self->Unref();
-    //DEBUG_P(" self->Unref() done");
     delete request;
     // Unref counter triggered by request.
-    //DEBUG_P("ev_unref() ...");
     ev_unref(EV_DEFAULT_UC);
-    //DEBUG_P("  ev_unref() done");
+
     return 0;
   }
 
@@ -512,6 +543,7 @@ class ZipLib : ObjectWrap {
  private:
   Processor processor_;
   State state_;
+  Request *tail_req_;
 
   static Persistent<FunctionTemplate> constructor_;
   static Persistent<Function> buffer_constructor_;
