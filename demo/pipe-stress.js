@@ -32,12 +32,28 @@ function delayed (fn) {
   setTimeout(fn, Math.floor(Math.random()*150.0)+10);
 }
 
-function startRound (n) {
-  var gzipper = new compress.GzipStream(9,true,true);
-  gzipper.setEncoding('binary');
+function gzipPair () {
+  var gzip_header = Math.random() < 0.5 ? true : false;
+  return [
+    new compress.GzipStream(9,true,gzip_header), // level, want_buffer, gzip_header
+    (Math.random() < 0.5)
+      ? new compress.GunzipStream(true) // auto-detect gzip/deflate mode
+      : new compress.GunzipStream(true,gzip_header) // explicit gzip/deflate mode
+  ];
+}
+var bzipPair = !compress.bzipSupport ? gzipPair : function () {
+  return [
+    new compress.BzipStream(1,0,true), // blockSize100k, workFactor, want_buffer
+    new compress.BunzipStream(true,true)  // small, want_buffer
+  ];
+}
 
-  var gunzipper = new compress.GunzipStream(true,true);
-  gunzipper.setEncoding('binary');
+function startRound (n) {
+  var pair = (n%2) ? gzipPair() : bzipPair();
+  var compressor = pair[0],
+      decompressor = pair[1];
+  compressor.setEncoding('binary');
+  decompressor.setEncoding('binary');
 
   var prefix = "For round "+n+", here is chunk number ";
   var expect = prefix+"1\n"+prefix+"2\n"+prefix+"3\n"+prefix+"4\n"+prefix+"5\n";
@@ -54,24 +70,24 @@ function startRound (n) {
     assert.ok(false, "round "+n+" error: "+err);
   };
   sink.on('error', er);
-  gzipper.on('error', er);
-  gunzipper.on('error', er);
+  compressor.on('error', er);
+  decompressor.on('error', er);
 
-  Stream.prototype.pipe.call(gunzipper, sink);
-  Stream.prototype.pipe.call(gzipper, gunzipper);
+  Stream.prototype.pipe.call(compressor, decompressor);
+  Stream.prototype.pipe.call(decompressor, sink);
 
   process.nextTick(function() {
     //sys.puts("-- round "+n+" starting");
-    gzipper.write(new Buffer(prefix+"1\n"));
-    gzipper.write(new Buffer(prefix+"2\n"));
+    compressor.write(new Buffer(prefix+"1\n"));
+    compressor.write(new Buffer(prefix+"2\n"));
     delayed(function() {
       // previously a bug would execute deflating these two buffers in parallel
       // and another bug would accidentally drop the "3" chunk
-      gzipper.write(new Buffer(prefix+"3\n"));
-      gzipper.write(new Buffer(prefix+"4\n"));
+      compressor.write(new Buffer(prefix+"3\n"));
+      compressor.write(new Buffer(prefix+"4\n"));
       delayed(function() {
-        gzipper.write(new Buffer(prefix+"5\n"));
-        gzipper.end();
+        compressor.write(new Buffer(prefix+"5\n"));
+        compressor.end();
       });
     });
   });
