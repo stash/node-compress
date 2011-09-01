@@ -235,7 +235,7 @@ class GunzipImpl {
 
  private:
   Handle<Value> Init(const Arguments &args) {
-    int gzip_header = 16;
+    int gzip_header = 32; // auto-detect by default
     stream_.zalloc = Z_NULL;
     stream_.zfree = Z_NULL;
     stream_.opaque = Z_NULL;
@@ -257,7 +257,7 @@ class GunzipImpl {
               String::New("gzip_header must be a boolean"));
           return ThrowException(exception);
         }
-        if(!args[1]->BooleanValue()) gzip_header = 0;
+        gzip_header = (args[1]->BooleanValue()) ? 16 : 0;
       }
     }
     int ret = inflateInit2(&stream_, gzip_header + MAX_WBITS);
