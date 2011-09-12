@@ -334,7 +334,7 @@ class ZipLib : ObjectWrap {
       DEBUG_P("%p Delaying Request [%p,%d]", this, request, request->kind());
       tail_req_->setNext(request);
     } else {
-      //DEBUG_P("%p Immediate Request [%p,%d]", this, request,request->kind());
+      DEBUG_P("%p Immediate Request [%p,%d]", this, request,request->kind());
       this->SchedRequest(request);
     }
     tail_req_ = request;
@@ -352,7 +352,7 @@ class ZipLib : ObjectWrap {
   }
 
   void DoProcess(Request *request) {
-    DEBUG_P("%p Processing [%p]", this, request);
+    DEBUG_P("strm:%p Processing [%p,%d]", this, request, request->kind());
     switch (request->kind()) {
       case Request::RWrite:
         request->setStatus(
@@ -375,6 +375,7 @@ class ZipLib : ObjectWrap {
   // Handle callbacks, potentially scheduling another Request from the tail-queue.
   // Executed in V8 threads.
   static int DoHandleCallbacks(eio_req *req) {
+    DEBUG_P("DoHandleCallbacks");
     Request *request = reinterpret_cast<Request*>(req->data);
 
     Self *self = request->self();
@@ -385,14 +386,14 @@ class ZipLib : ObjectWrap {
     // do this *after* the callback since the CB *could have* scheduled another request
     Request *next = request->next();
 
-    if(request->flush()) {
-      DEBUG_P("%p Destroy via Callback, KILL next:[%p,%d]", self, next, next?next->kind():-1);
+    if (request->flush()) {
+      DEBUG_P("%p Destroy via Callback", self);
       self->Destroy();
     }
 
     if (next) {
       assert(!request->flush());
-      DEBUG_P("%p Found pending Request next:[%p,%d]", self, next, next->kind());
+      DEBUG_P("%p Found pending Request req:[%p,%d] next:[%p,%d]", self, request, request->kind(), next, next->kind());
       self->SchedRequest(next);
     } else {
       assert(self->tail_req_ == request);
@@ -409,7 +410,8 @@ class ZipLib : ObjectWrap {
     return 0;
   }
 
-  static void DoCallback(Persistent<Function> cb, int r, Blob &out) {
+  void DoCallback(Persistent<Function> cb, int r, Blob &out) {
+    DEBUG_P("%p r:%d", this, r);
     if (!cb.IsEmpty()) {
       HandleScope scope;
 
@@ -460,6 +462,7 @@ class ZipLib : ObjectWrap {
 
 
   int Write(char *data, int dataLength, Blob &out, bool flush) {
+    DEBUG_P("%p",this);
     COND_RETURN(state_ != Self::Data, Utils::StatusSequenceError());
 
     Transition t(state_, Self::Error);
@@ -488,6 +491,7 @@ class ZipLib : ObjectWrap {
 
 
   int Close(Blob &out) {
+    DEBUG_P("%p",this);
     COND_RETURN(state_ == Self::Idle || state_ == Self::Destroyed,
         Utils::StatusOk());
 
@@ -505,6 +509,7 @@ class ZipLib : ObjectWrap {
 
 
   void Destroy() {
+    DEBUG_P("%p",this);
     if (state_ != Self::Idle && state_ != Self::Destroyed) {
       this->processor_.Destroy();
     }

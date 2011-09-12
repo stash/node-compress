@@ -115,7 +115,7 @@ class ScopedOutputBuffer {
 
 
   void Free() {
-    //DEBUG_P("FREE %p, size %d", (void*)data_, capacity_);
+    DEBUG_P("FREE %p, size %d", (void*)data_, capacity_);
     if (data_) free(data_);
     data_ = 0;
     capacity_ = 0;
@@ -157,7 +157,7 @@ class ScopedOutputBuffer {
     }
 
     T *tmp = (T*) realloc(data_, sz * sizeof(T));
-    //DEBUG_P("REALLOC %p to %p, size %d to %d", (void*)data_, (void*)tmp, capacity_, sz*sizeof(T));
+    DEBUG_P("REALLOC %p to %p, size %d to %d", (void*)data_, (void*)tmp, capacity_, sz*sizeof(T));
     if (tmp == NULL) {
       return false;
     }
