@@ -389,14 +389,29 @@ class ZipLib : ObjectWrap {
     if (request->flush()) {
       DEBUG_P("%p Destroy via Callback", self);
       self->Destroy();
+
+      while (next) {
+        DEBUG_P("%p Found invalidated pending Request [%p,%d]", self, next, next->kind());
+
+        HandleScope scope;
+        TryCatch try_catch;
+        Local<Value> argv[2];
+        argv[0] = Local<Value>::New(Undefined());
+        argv[1] = Local<Value>::New(Undefined());
+        next->callback()->Call(Context::GetCurrent()->Global(), 2, argv);
+        if (try_catch.HasCaught()) {
+          FatalException(try_catch);
+        }
+        delete next;
+
+        next = next->next();
+      }
     }
 
     if (next) {
-      assert(!request->flush());
       DEBUG_P("%p Found pending Request req:[%p,%d] next:[%p,%d]", self, request, request->kind(), next, next->kind());
       self->SchedRequest(next);
     } else {
-      assert(self->tail_req_ == request);
       DEBUG_P("%p No pending Requests", self);
       self->tail_req_ = 0;
     }
