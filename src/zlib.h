@@ -512,7 +512,7 @@ class ZipLib : ObjectWrap {
   }
 
   int Finish(Blob &out) {
-    const int Chunk = 128;
+    const int Chunk = 4096;
 
     int ret;
     do {
