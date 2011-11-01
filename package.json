@@ -1,7 +1,7 @@
 {
   "name": "compress",
   "description": "A streaming compressor for node.js",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": "Ivan Egorov",
   "contributors" : [ "Theo Schlossnagle", "Jeremy Stashewsky" ],
   "repository": {
